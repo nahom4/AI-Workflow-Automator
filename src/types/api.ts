@@ -1,16 +1,7 @@
-import { WorkflowDefinition } from "./workflow";
+import type { CreateAutomationInput, UpdateAutomationInput } from "@/lib/validation";
 
-export interface ParseRequest {
-  text: string;
-}
+export type { CreateAutomationInput, UpdateAutomationInput };
 
-export interface CreateAutomationRequest {
-  description: string;
-  workflow: WorkflowDefinition;
-}
-
-export interface TriggerWebhookResponse {
-  executionId: string;
-  logsUrl: string;
-  message: string;
+export interface ApiError {
+  error: string | object;
 }

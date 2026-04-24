@@ -1,20 +1,20 @@
 import { db, initDb } from "@/lib/db";
 import { AutomationRow } from "@/types/db";
-import { WorkflowDefinition } from "@/types/workflow";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-const ACTION_ICONS: Record<string, string> = {
-  slack: "S",
-  email: "E",
-  http: "H",
+const STATUS_STYLES: Record<string, string> = {
+  active: "bg-green-900 text-green-300",
+  paused: "bg-gray-800 text-gray-400",
+  broken: "bg-red-900 text-red-300",
 };
 
-const ACTION_COLORS: Record<string, string> = {
-  slack: "bg-green-900 text-green-300",
-  email: "bg-blue-900 text-blue-300",
-  http: "bg-orange-900 text-orange-300",
+const VERTICAL_ICONS: Record<string, string> = {
+  jobs: "💼",
+  products: "📦",
+  scholarships: "🎓",
+  other: "⚡",
 };
 
 export default async function AutomationsPage() {
@@ -32,8 +32,8 @@ export default async function AutomationsPage() {
           No automations yet
         </h1>
         <p className="text-gray-400 mb-8 max-w-sm">
-          Describe an automation in plain English and we&apos;ll generate a live
-          webhook URL that runs it.
+          Describe what you want to track — jobs, products, scholarships — and
+          get notified when new matches appear.
         </p>
         <Link
           href="/automations/new"
@@ -54,48 +54,55 @@ export default async function AutomationsPage() {
             {automations.length} automation{automations.length !== 1 ? "s" : ""}
           </p>
         </div>
+        <Link
+          href="/automations/new"
+          className="bg-violet-600 hover:bg-violet-500 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm"
+        >
+          + New
+        </Link>
       </div>
 
       <div className="space-y-3">
-        {automations.map((a) => {
-          const workflow: WorkflowDefinition = JSON.parse(a.workflow);
-          return (
-            <Link
-              key={a.id}
-              href={`/automations/${a.id}`}
-              className="block bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-violet-700 transition-colors group"
-            >
-              <div className="flex items-start justify-between gap-4">
+        {automations.map((a) => (
+          <Link
+            key={a.id}
+            href={`/automations/${a.id}`}
+            className="block bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-violet-700 transition-colors group"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex items-start gap-3">
+                <span className="text-2xl flex-shrink-0">
+                  {VERTICAL_ICONS[a.vertical] ?? "⚡"}
+                </span>
                 <div className="min-w-0">
                   <h2 className="font-semibold text-gray-100 group-hover:text-violet-300 transition-colors truncate">
                     {a.name}
                   </h2>
-                  <p className="text-gray-400 text-sm mt-1 truncate">
-                    {a.description}
+                  <p className="text-gray-400 text-sm mt-0.5 truncate">
+                    {a.intent_text}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {workflow.steps.map((step, i) => (
-                    <span
-                      key={i}
-                      className={`text-xs font-bold px-2 py-0.5 rounded ${ACTION_COLORS[step.type] ?? "bg-gray-800 text-gray-400"}`}
-                    >
-                      {ACTION_ICONS[step.type] ?? step.type}
-                    </span>
-                  ))}
-                </div>
               </div>
-              <div className="mt-3 text-xs text-gray-600">
-                Created{" "}
-                {new Date(a.created_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </div>
-            </Link>
-          );
-        })}
+              <span
+                className={`text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0 ${STATUS_STYLES[a.status] ?? "bg-gray-800 text-gray-400"}`}
+              >
+                {a.status}
+              </span>
+            </div>
+            <div className="mt-3 flex items-center gap-4 text-xs text-gray-600">
+              <span>{a.schedule_cron}</span>
+              {a.last_run_at && (
+                <span>
+                  Last run:{" "}
+                  {new Date(a.last_run_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              )}
+            </div>
+          </Link>
+        ))}
       </div>
     </div>
   );

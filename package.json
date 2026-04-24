@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:python": "python -m pytest tests/python/ -v",
+    "test:all": "playwright test && python -m pytest tests/python/ -v"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
@@ -22,6 +26,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

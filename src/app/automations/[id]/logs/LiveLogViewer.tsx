@@ -3,25 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 
 interface LogLine {
-  stepIndex: number;
-  level: "info" | "success" | "error";
+  level: "info" | "success" | "error" | "warning";
   message: string;
-  ts: number;
+  created_at: number;
 }
 
-const LEVEL_COLOR = {
+const LEVEL_COLOR: Record<string, string> = {
   info: "text-blue-400",
   success: "text-green-400",
   error: "text-red-400",
+  warning: "text-yellow-400",
 };
 
-export default function LiveLogViewer({ executionId }: { executionId: string }) {
+export default function LiveLogViewer({ runId }: { runId: string }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [done, setDone] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const es = new EventSource(`/api/logs/${executionId}`);
+    const es = new EventSource(`/api/runs/${runId}/logs`);
 
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
@@ -41,7 +41,7 @@ export default function LiveLogViewer({ executionId }: { executionId: string }) 
     };
 
     return () => es.close();
-  }, [executionId]);
+  }, [runId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -55,7 +55,7 @@ export default function LiveLogViewer({ executionId }: { executionId: string }) 
       {logs.map((log, i) => (
         <div key={i} className="flex gap-3 mb-0.5">
           <span className="text-gray-600 select-none flex-shrink-0">
-            {new Date(log.ts).toLocaleTimeString()}
+            {new Date(log.created_at).toLocaleTimeString()}
           </span>
           <span className={LEVEL_COLOR[log.level] ?? "text-gray-300"}>
             {log.message}
