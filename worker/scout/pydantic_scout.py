@@ -47,7 +47,7 @@ async def scout(tab, *, url: str, vertical: str) -> dict | None:
     await settle(tab, 2)
 
     # Find the repeating subtree via JS
-    card_candidates = await tab.evaluate(
+    card_candidates = await tab.execute_script(
         _REPEATING_SUBTREE_JS,
         return_by_value=True,
     )
@@ -62,7 +62,7 @@ async def scout(tab, *, url: str, vertical: str) -> dict | None:
 
     # Take the best candidate and sample 3 card HTML snippets
     best = candidates[0]
-    sample_html = await tab.evaluate(
+    sample_html = await tab.execute_script(
         f"""
         (function() {{
             const cards = Array.from(document.querySelectorAll({json.dumps(best['selector'])})).slice(0, 3);

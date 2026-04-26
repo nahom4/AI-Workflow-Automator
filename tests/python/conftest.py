@@ -24,10 +24,9 @@ def make_mock_tab(
     """Return a minimal AsyncMock that looks like a pydoll tab."""
     tab = MagicMock()
 
-    async def _execute_script(script, **kwargs):
-        return execute_script_return or {"result": {"result": {"value": []}}}
-
-    tab.execute_script = _execute_script
+    tab.execute_script = AsyncMock(
+        return_value=execute_script_return or {"result": {"result": {"value": []}}}
+    )
     tab.go_to = AsyncMock()
     tab.enable_auto_solve_cloudflare_captcha = AsyncMock()
     tab.enable_network_events = AsyncMock()
