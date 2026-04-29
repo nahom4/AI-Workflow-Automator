@@ -5,6 +5,7 @@ All tests run from the project root so `worker` is importable directly.
 
 import json
 import sys
+import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +13,16 @@ import pytest
 
 # Make sure project root is on path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Inject libsql_client stub so worker.db can be imported without the real package.
+# If the real package is installed it takes precedence (the `if` guard keeps it).
+if "libsql_client" not in sys.modules:
+    from tests.python._libsql_stub import Statement, create_client  # noqa: E402
+
+    _stub = types.ModuleType("libsql_client")
+    _stub.Statement = Statement  # type: ignore[attr-defined]
+    _stub.create_client = create_client  # type: ignore[attr-defined]
+    sys.modules["libsql_client"] = _stub
 
 
 def make_mock_tab(

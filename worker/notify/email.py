@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import resend
-
 from worker.config import RESEND_API_KEY, RESEND_FROM
 
 
@@ -17,6 +15,8 @@ async def send_lead_digest(
         raise RuntimeError("RESEND_API_KEY not set")
     if not leads:
         return
+
+    import resend  # lazy — not installed locally
 
     resend.api_key = RESEND_API_KEY
 
