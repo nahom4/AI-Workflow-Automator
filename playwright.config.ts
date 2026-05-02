@@ -9,6 +9,8 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://localhost:3001",
+    // Bypass any system proxy for local test server connections
+    proxy: { server: "http://localhost:3001", bypass: "localhost,127.0.0.1" },
   },
   projects: [
     {

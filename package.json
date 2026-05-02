@@ -7,10 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "playwright test",
-    "test:ui": "playwright test --ui",
+    "test": "cross-env NO_PROXY=* HTTPS_PROXY= HTTP_PROXY= playwright test",
+    "test:ui": "cross-env NO_PROXY=* HTTPS_PROXY= HTTP_PROXY= playwright test --ui",
     "test:python": "python -m pytest tests/python/ -v",
-    "test:all": "playwright test && python -m pytest tests/python/ -v"
+    "test:all": "cross-env NO_PROXY=* HTTPS_PROXY= HTTP_PROXY= playwright test && python -m pytest tests/python/ -v"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
