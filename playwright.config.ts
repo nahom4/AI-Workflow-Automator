@@ -9,13 +9,19 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://localhost:3001",
-    // Bypass any system proxy for local test server connections
-    proxy: { server: "http://localhost:3001", bypass: "localhost,127.0.0.1" },
+    // Bypass system SOCKS proxy for local connections
+    proxy: { server: "socks5://127.0.0.1:40000", bypass: "localhost,127.0.0.1" },
   },
   projects: [
     {
       name: "api",
+      testMatch: /\/api\//,
       // No browser — request fixture only
+    },
+    {
+      name: "ui",
+      testMatch: /\/ui\//,
+      use: { channel: "chrome" }, // use system Chrome — no Playwright browser download needed
     },
   ],
   webServer: {

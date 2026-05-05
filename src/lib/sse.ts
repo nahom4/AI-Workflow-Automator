@@ -1,8 +1,11 @@
 export interface LogEvent {
-  stepIndex: number;
-  level: "info" | "success" | "error";
-  message: string;
-  ts: number;
+  type?: string;
+  stepIndex?: number;
+  level?: "info" | "success" | "error";
+  message?: string;
+  ts?: number;
+  status?: string;
+  [key: string]: unknown;
 }
 
 type Subscriber = (event: LogEvent) => void;

@@ -16,7 +16,7 @@ const chatRequestSchema = z.object({
   notify_email: z.string().email().optional(),
 });
 
-const TOOLS: Groq.Chat.CompletionCreateParams.Tool[] = [
+const TOOLS = [
   {
     type: "function",
     function: {
