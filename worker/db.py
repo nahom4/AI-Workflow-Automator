@@ -11,12 +11,23 @@ import time
 from pathlib import Path
 from typing import Any
 
-import libsql_client
+try:
+    import libsql_client
+except ImportError:
+    # libsql-client not available locally — use the bundled sqlite3 stub
+    import sys, types as _types, pathlib as _pathlib
+    _stub_path = str(_pathlib.Path(__file__).parent.parent / "tests" / "python")
+    if _stub_path not in sys.path:
+        sys.path.insert(0, _stub_path)
+    from _libsql_stub import Statement as _S, create_client as _cc  # type: ignore
+    libsql_client = _types.ModuleType("libsql_client")  # type: ignore
+    libsql_client.Statement = _S  # type: ignore
+    libsql_client.create_client = _cc  # type: ignore
 
 from worker.config import TURSO_URL, TURSO_TOKEN, DATABASE_PATH
 
 
-def _make_client() -> libsql_client.Client:
+def _make_client():  # type: ignore[return]
     if TURSO_URL and TURSO_TOKEN:
         return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
     db_path = Path(DATABASE_PATH).resolve()
@@ -24,14 +35,58 @@ def _make_client() -> libsql_client.Client:
     return libsql_client.create_client(url=f"file:{db_path}")
 
 
-_client: libsql_client.Client | None = None
+_client = None
 
 
-def get_client() -> libsql_client.Client:
+def get_client():
     global _client
     if _client is None:
         _client = _make_client()
     return _client
+
+
+_SCHEMA_STMTS = [
+    """CREATE TABLE IF NOT EXISTS automations (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, intent_text TEXT NOT NULL,
+      vertical TEXT NOT NULL DEFAULT 'other', spec_json TEXT NOT NULL,
+      schedule_cron TEXT NOT NULL, notify_email TEXT, notify_whatsapp TEXT,
+      status TEXT NOT NULL DEFAULT 'active', last_run_at INTEGER,
+      next_run_at INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS leads (
+      id TEXT PRIMARY KEY, automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+      source_domain TEXT NOT NULL, external_id TEXT NOT NULL, url TEXT NOT NULL,
+      title TEXT NOT NULL, raw_json TEXT NOT NULL, score REAL NOT NULL,
+      matched_reasons TEXT, notified_at INTEGER, created_at INTEGER NOT NULL,
+      UNIQUE(automation_id, external_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS site_specs (
+      domain TEXT NOT NULL, vertical TEXT NOT NULL, tier TEXT NOT NULL,
+      spec_json TEXT NOT NULL, user_confirmed INTEGER NOT NULL DEFAULT 0,
+      last_validated_at INTEGER, success_rate REAL, created_at INTEGER NOT NULL,
+      PRIMARY KEY (domain, vertical)
+    )""",
+    """CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY, automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running', started_at INTEGER NOT NULL,
+      finished_at INTEGER, items_seen INTEGER DEFAULT 0, items_kept INTEGER DEFAULT 0, errors_json TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS run_logs (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      level TEXT NOT NULL, message TEXT NOT NULL, created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at, status)",
+    "CREATE INDEX IF NOT EXISTS idx_leads_automation_id ON leads(automation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_automation_id ON runs(automation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_run_logs_run_id ON run_logs(run_id)",
+]
+
+
+async def ensure_schema() -> None:
+    """Create all tables if they don't exist. Safe to call on every startup."""
+    client = get_client()
+    for stmt in _SCHEMA_STMTS:
+        await client.execute(libsql_client.Statement(stmt))
 
 
 async def fetch_due_automations() -> list[dict]:

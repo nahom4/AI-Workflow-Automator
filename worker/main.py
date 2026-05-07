@@ -14,13 +14,21 @@ import asyncio
 import signal
 import sys
 
-from rich.console import Console
+try:
+    from rich.console import Console as _Console
+    console = _Console()
+except ImportError:
+    import re as _re
+
+    class console:  # type: ignore[no-redef]
+        @staticmethod
+        def print(*args, **kwargs):
+            text = " ".join(str(a) for a in args)
+            print(_re.sub(r"\[/?[^\]]*\]", "", text))
 
 from worker.config import POLL_INTERVAL
 from worker.runner import run_automation
 from worker import db
-
-console = Console()
 _shutdown = False
 
 
@@ -37,6 +45,7 @@ signal.signal(signal.SIGTERM, _handle_signal)
 async def main() -> None:
     console.print("[bold green]AI Workflow Automator — worker started[/bold green]")
     console.print(f"Poll interval: {POLL_INTERVAL}s")
+    await db.ensure_schema()
 
     while not _shutdown:
         try:
