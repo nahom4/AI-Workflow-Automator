@@ -10,6 +10,7 @@ const chatRequestSchema = z.object({
       z.object({
         role: z.enum(["user", "assistant"]),
         content: z.string(),
+        tool: z.string().optional(),
       })
     )
     .min(1),
@@ -99,6 +100,9 @@ When a user describes what they want to track:
 
 Be specific. Keep responses under 3 sentences unless listing sources.`;
 
+const CONFIRMATION_RE =
+  /\b(yes|yeah|yep|ok|okay|sure|go ahead|create|make it|do it|let'?s|sounds good|perfect|great|confirm|proceed|continue|start it|set it up)\b/i;
+
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -127,12 +131,27 @@ export async function POST(request: NextRequest) {
 
   const groq = new Groq({ apiKey });
 
+  // Detect: sources were already suggested and user is now confirming.
+  const sourcesAlreadySuggested = messages.some(
+    (m) => m.role === "assistant" && m.tool === "suggest_sources"
+  );
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+  const userIsConfirming =
+    sourcesAlreadySuggested &&
+    lastUserMsg != null &&
+    CONFIRMATION_RE.test(lastUserMsg.content);
+
+  // Strip the internal `tool` field before sending to Groq.
+  const groqMessages = messages.map(({ role, content }) => ({ role, content }));
+
   try {
     const completion = await groq.chat.completions.create({
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-      messages: [{ role: "system", content: SYSTEM }, ...messages],
+      messages: [{ role: "system", content: SYSTEM }, ...groqMessages],
       tools: TOOLS,
-      tool_choice: "auto",
+      tool_choice: userIsConfirming
+        ? { type: "function", function: { name: "create_automation" } }
+        : "auto",
       max_tokens: 1024,
       temperature: 0.3,
     });

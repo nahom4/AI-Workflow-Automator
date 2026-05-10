@@ -49,7 +49,7 @@ export default function NewAutomationPage() {
         body: JSON.stringify({
           messages: next
             .filter((m) => m.content)
-            .map(({ role, content }) => ({ role, content })),
+            .map(({ role, content, tool }) => ({ role, content, tool })),
           notify_email: notifyEmail || undefined,
         }),
       });
