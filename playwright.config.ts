@@ -1,5 +1,22 @@
 import { defineConfig } from "@playwright/test";
 import path from "path";
+import fs from "fs";
+
+// Load .env.local into process.env so live-Groq tests run without
+// manually exporting vars before each `playwright test` invocation.
+(function loadLocalEnv() {
+  const envFile = path.join(process.cwd(), ".env.local");
+  if (!fs.existsSync(envFile)) return;
+  for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!(key in process.env)) process.env[key] = val;
+  }
+})();
 
 export default defineConfig({
   testDir: "./tests/integration",
@@ -33,6 +50,7 @@ export default defineConfig({
       DATABASE_PATH: path.join(process.cwd(), "data", "test.db"),
       TURSO_DATABASE_URL: "",
       TURSO_AUTH_TOKEN: "",
+      GROQ_API_KEY: process.env.GROQ_API_KEY ?? "",
     },
   },
 });
