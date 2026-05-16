@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 
 const chatRequestSchema = z.object({
   messages: z
@@ -101,7 +101,7 @@ When a user describes what they want to track:
 Be specific. Keep responses under 3 sentences unless listing sources.`;
 
 const CONFIRMATION_RE =
-  /\b(yes|yeah|yep|ok|okay|sure|go ahead|create|make it|do it|let'?s|sounds good|perfect|great|confirm|proceed|continue|start it|set it up)\b/i;
+  /\b(yes|yeah|yep|ok|okay|sure|go ahead|create|generate|build|make it|do it|let'?s|sounds good|perfect|great|confirm|proceed|continue|start it|set it up)\b/i;
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -169,6 +169,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (tc.function.name === "create_automation") {
+        await initDb();
         const database = db();
         const id = nanoid();
         const now = Date.now();

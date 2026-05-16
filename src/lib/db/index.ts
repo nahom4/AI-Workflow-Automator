@@ -26,6 +26,24 @@ function getClient(): Client {
   return client;
 }
 
+async function migrateDb(db: Client): Promise<void> {
+  // Add columns that may be missing from older schema versions.
+  // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we catch errors.
+  const migrations: [string, string][] = [
+    ["automations", "schedule_cron TEXT NOT NULL DEFAULT '0 */6 * * *'"],
+    ["automations", "notify_whatsapp TEXT"],
+    ["automations", "vertical TEXT NOT NULL DEFAULT 'other'"],
+    ["automations", "last_run_at INTEGER"],
+  ];
+  for (const [table, colDef] of migrations) {
+    try {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+    } catch {
+      // Column already exists — ignore.
+    }
+  }
+}
+
 export async function initDb() {
   const db = getClient();
   await db.executeMultiple(`
@@ -103,6 +121,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_automations_next_run
       ON automations(next_run_at, status);
   `);
+  await migrateDb(db);
 }
 
 export function db(): Client {
