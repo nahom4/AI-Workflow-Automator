@@ -39,7 +39,14 @@ async def rank(
     )
     raw = await chat(prompt, system=_SYSTEM)
     try:
-        data = json.loads(raw)
+        # Strip markdown code fences that some models wrap around JSON
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.rsplit("```", 1)[0].strip()
+        data = json.loads(text)
         score = float(data["score"])
         reasons: list[str] = data.get("reasons", [])
         return score, reasons

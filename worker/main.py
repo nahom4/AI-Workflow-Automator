@@ -58,9 +58,9 @@ async def main() -> None:
                 console.print(f"  Running: [bold]{automation['name']}[/bold] ({automation['id']})")
                 try:
                     await run_automation(automation)
-                    console.print(f"  [green]✓ {automation['name']} completed[/green]")
+                    console.print(f"  [green]OK {automation['name']} completed[/green]")
                 except Exception as exc:
-                    console.print(f"  [red]✗ {automation['name']} failed: {exc}[/red]")
+                    console.print(f"  [red]FAIL {automation['name']}: {exc}[/red]")
                     await db.mark_automation_broken(automation["id"])
         except Exception as exc:
             console.print(f"[red]Poll error: {exc}[/red]")

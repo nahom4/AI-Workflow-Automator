@@ -37,13 +37,22 @@ async def run_automation(automation: dict) -> None:
     new_leads: list[dict] = []
     errors: list[str] = []
 
-    browser = make_chrome()
-    tab = await browser.start()
+    # Browser is created lazily — browser-free adapters (remoteok, etc.) skip it entirely.
+    browser = None
+    tab = None
+
+    async def get_tab():
+        nonlocal browser, tab
+        if tab is None:
+            browser = make_chrome()
+            tab = await browser.start()
+        return tab
+
     try:
         for domain in sources:
             try:
                 items = await _fetch_items(
-                    tab,
+                    get_tab,
                     domain=domain,
                     vertical=vertical,
                     spec=spec,
@@ -92,10 +101,11 @@ async def run_automation(automation: dict) -> None:
                 errors.append(msg)
                 await _log(run_id, "error", msg)
     finally:
-        try:
-            await browser.stop()
-        except Exception:
-            pass
+        if browser is not None:
+            try:
+                await browser.stop()
+            except Exception:
+                pass
 
     await _log(run_id, "info", f"Kept {items_kept} / {items_seen} items ({len(new_leads)} new)")
 
@@ -134,7 +144,7 @@ async def run_automation(automation: dict) -> None:
 
 
 async def _fetch_items(
-    tab,
+    get_tab,
     *,
     domain: str,
     vertical: str,
@@ -144,27 +154,28 @@ async def _fetch_items(
     """Route to the right adapter; fall back to scout for unknown domains."""
     from worker.adapters import remoteok, upwork
 
-    # Pre-built adapters
+    # Pre-built browser-free adapters
     if domain == remoteok.DOMAIN:
-        return await remoteok.fetch_items()  # no browser needed
+        return await remoteok.fetch_items()
 
     if domain == upwork.DOMAIN and vertical == upwork.VERTICAL:
         query = spec.get("query") or " ".join(spec.get("criteria", []))
-        return await upwork.fetch_items(tab, search_query=query)
+        return await upwork.fetch_items(await _require_tab(get_tab, run_id, domain), search_query=query)
 
-    # Unknown domain — run the 3-tier scout
+    # Unknown domain — run the 3-tier scout (needs browser)
     site_spec = await db.get_site_spec(domain, vertical)
 
     if site_spec and site_spec.get("user_confirmed"):
         tier_spec = json.loads(site_spec["spec_json"])
         if site_spec["tier"] == "api":
-            return await _fetch_via_api_spec(tab, domain, tier_spec)
+            return await _fetch_via_api_spec(await _require_tab(get_tab, run_id, domain), domain, tier_spec)
         if site_spec["tier"] == "pydantic":
-            return await _fetch_via_pydantic_spec(tab, domain, tier_spec)
+            return await _fetch_via_pydantic_spec(await _require_tab(get_tab, run_id, domain), domain, tier_spec)
 
     # Scout — Tier 1 then Tier 2
     await _log(run_id, "info", f"{domain}: no confirmed spec, running scout…")
     url = f"https://{domain}"
+    tab = await _require_tab(get_tab, run_id, domain)
 
     tier1 = await network_sniff.scout(tab, url=url, vertical=vertical)
     if tier1:
@@ -180,6 +191,16 @@ async def _fetch_items(
 
     await _log(run_id, "warning", f"{domain}: scout found nothing — skipping this source")
     return []
+
+
+async def _require_tab(get_tab, run_id: str, domain: str):
+    """Start the browser tab, logging a clear error if pydoll is unavailable."""
+    try:
+        return await get_tab()
+    except ModuleNotFoundError as exc:
+        msg = f"{domain}: browser not available in this environment ({exc}) — skipping"
+        await _log(run_id, "warning", msg)
+        raise RuntimeError(msg) from exc
 
 
 async def _fetch_via_api_spec(tab, domain: str, spec: dict) -> list[dict]:
