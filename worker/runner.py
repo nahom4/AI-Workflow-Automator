@@ -13,7 +13,7 @@ from croniter import croniter  # type: ignore
 
 from worker import db
 from worker.ai.ranker import rank
-from worker.browser import make_chrome
+from worker.browser import make_chrome, start_browser
 from worker.notify.email import send_lead_digest
 from worker.scout import network_sniff, pydantic_scout
 from worker.scout.validate import is_healthy
@@ -44,8 +44,7 @@ async def run_automation(automation: dict) -> None:
     async def get_tab():
         nonlocal browser, tab
         if tab is None:
-            browser = make_chrome()
-            tab = await browser.start()
+            browser, tab = await start_browser(retries=2)
         return tab
 
     try:
@@ -100,6 +99,19 @@ async def run_automation(automation: dict) -> None:
                 msg = f"{domain}: {exc}"
                 errors.append(msg)
                 await _log(run_id, "error", msg)
+                # Chrome death (ConnectionRefused, dead CDP socket, "Stop called
+                # but browser is not running") leaves `tab`/`browser` pointing
+                # at a corpse. Reset them so the next source spawns a fresh one
+                # via get_tab().
+                if _is_browser_failure(exc):
+                    await _log(run_id, "info", f"{domain}: resetting browser after Chrome failure")
+                    if browser is not None:
+                        try:
+                            await browser.stop()
+                        except Exception:
+                            pass
+                    browser = None
+                    tab = None
     finally:
         if browser is not None:
             try:
@@ -204,18 +216,146 @@ async def _require_tab(get_tab, run_id: str, domain: str):
 
 
 async def _fetch_via_api_spec(tab, domain: str, spec: dict) -> list[dict]:
+    """Call the discovered API endpoint, walk to the items array, flatten
+    each item using the spec's `fields` mapping into {id,title,url,...}.
+    """
     endpoint = spec["endpoint"]
     resp = await tab.request.get(endpoint, headers={"Accept": "application/json"})
     data = resp.json()
     for key in (spec.get("item_path") or "").split("."):
         if key and isinstance(data, dict):
-            data = data[key]
-    return data if isinstance(data, list) else []
+            data = data.get(key, {})
+    if not isinstance(data, list):
+        return []
+
+    fields: dict = spec.get("fields") or {}
+    out: list[dict] = []
+    for raw in data:
+        if not isinstance(raw, dict):
+            continue
+        flat = {name: _walk_path(raw, path) for name, path in fields.items() if path}
+        # Always preserve raw payload so the ranker sees full context
+        merged = {**raw, **{k: v for k, v in flat.items() if v is not None}}
+        # Coerce id to string for stable upserts
+        if merged.get("id") is not None:
+            merged["id"] = str(merged["id"])
+        out.append(merged)
+    return out
+
+
+def _walk_path(obj, path: str):
+    """Walk a dot-path through nested dicts/lists. Returns None on miss."""
+    if not path:
+        return obj
+    cur = obj
+    for part in path.split("."):
+        if cur is None:
+            return None
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return cur
 
 
 async def _fetch_via_pydantic_spec(tab, domain: str, spec: dict) -> list[dict]:
-    raise NotImplementedError("Pydantic extraction wired in Day 3")
+    """Navigate to the source URL, query cards via the saved spec, extract
+    each field with document.querySelector inside the card root.
+
+    The whole call is wrapped in a 90s timeout so a wedged Chrome instance
+    can't block the worker — the runner catches the resulting exception,
+    logs it, and moves on to the next source.
+    """
+    import asyncio
+    from worker.browser import navigate, wait_for_content
+
+    url = f"https://{domain}"
+    try:
+        await asyncio.wait_for(navigate(tab, url), timeout=60.0)
+        await asyncio.wait_for(wait_for_content(tab, max_wait=20.0), timeout=25.0)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(f"{domain}: page load hard-timed-out") from exc
+
+    card_sel = spec.get("card_selector")
+    fields: dict = spec.get("fields") or {}
+    if not card_sel or not fields:
+        return []
+
+    # Plain script with `return` — pydoll auto-wraps it into an IIFE for us.
+    js = f"""
+    const cardSel = {json.dumps(card_sel)};
+    const fields = {json.dumps(fields)};
+    const cards = Array.from(document.querySelectorAll(cardSel));
+    const out = cards.map(card => {{
+      const row = {{}};
+      for (const [name, conf] of Object.entries(fields)) {{
+        if (!conf || !conf.selector) continue;
+        let el = null;
+        try {{ el = card.querySelector(conf.selector); }} catch (e) {{ el = null; }}
+        if (!el) continue;
+        let v = conf.attr ? el.getAttribute(conf.attr) : el.textContent;
+        if (typeof v === 'string') {{
+          v = v.trim();
+          if (conf.attr === 'href' && v && !/^https?:/i.test(v)) {{
+            try {{ v = new URL(v, location.href).href; }} catch (e) {{}}
+          }}
+        }}
+        if (v) row[name] = v;
+      }}
+      return row;
+    }}).filter(r => r.title || r.url);
+    return JSON.stringify(out);
+    """
+    try:
+        raw = await asyncio.wait_for(
+            tab.execute_script(js, return_by_value=True),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(f"{domain}: extraction script timed out") from exc
+    try:
+        value = raw["result"]["result"]["value"]
+    except (KeyError, TypeError):
+        return []
+    if not value:
+        return []
+    try:
+        items = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(items, list):
+        return []
+
+    # Ensure stable ids so dedupe works across runs
+    for it in items:
+        if not it.get("id"):
+            it["id"] = it.get("url") or ""
+        else:
+            it["id"] = str(it["id"])
+    return items
 
 
 async def _log(run_id: str, level: str, message: str) -> None:
     await db.append_run_log(run_id, level, message)
+
+
+_BROWSER_DEAD_MARKERS = (
+    "browser is not running",
+    "remote computer refused",
+    "ConnectionRefusedError",
+    "Chrome wedged",
+    "hard-timed-out",
+    "FailedToStartBrowser",
+    "browser closed",
+)
+
+
+def _is_browser_failure(exc: BaseException) -> bool:
+    """Heuristic: did this exception come from a dead Chrome process?"""
+    s = repr(exc)
+    return any(m.lower() in s.lower() for m in _BROWSER_DEAD_MARKERS)

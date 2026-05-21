@@ -17,6 +17,29 @@ _key_index = 0
 _last_call_time = 0.0
 
 
+def strip_code_fences(text: str) -> str:
+    """Remove a single ```lang ... ``` markdown fence from an LLM response.
+
+    Handles ``` and ```json forms, trims surrounding whitespace. Pass-through
+    when no fence is present.
+    """
+    if not text:
+        return text
+    s = text.strip()
+    if not s.startswith("```"):
+        return s
+    s = s[3:]
+    # Drop optional language hint (json, javascript, etc.) on the first line
+    nl = s.find("\n")
+    if nl != -1:
+        first_line = s[:nl].strip().lower()
+        if first_line and all(c.isalnum() or c in "+-_" for c in first_line):
+            s = s[nl + 1:]
+    if "```" in s:
+        s = s.rsplit("```", 1)[0]
+    return s.strip()
+
+
 def _current_key() -> str:
     return GROQ_API_KEYS[_key_index % len(GROQ_API_KEYS)]
 

@@ -5,6 +5,7 @@ RemoteOK exposes a public JSON API at /api with no auth or browser required.
 
 from __future__ import annotations
 
+import os
 import httpx
 
 DOMAIN = "remoteok.com"
@@ -47,6 +48,7 @@ async def fetch_items() -> list[dict]:
     if not isinstance(data, list):
         return []
 
+    limit = int(os.getenv("REMOTEOK_LIMIT", "0")) or None
     jobs = []
     for item in data:
         if not isinstance(item, dict):
@@ -55,6 +57,8 @@ async def fetch_items() -> list[dict]:
         if not raw_id:
             continue
         jobs.append(_normalize(item))
+        if limit and len(jobs) >= limit:
+            break
 
     return jobs
 

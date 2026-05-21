@@ -1,7 +1,7 @@
 """
 Tier 1 scout: capture XHR/fetch responses during page load using pydoll's
-get_network_logs() + get_network_response_body(), then ask Groq which
-endpoint carries the listing data for a given vertical.
+HAR recorder (tab.request.record), then ask Groq which endpoint carries the
+listing data for a given vertical.
 
 Returns a spec dict:
 {
@@ -17,10 +17,11 @@ Returns a spec dict:
 
 from __future__ import annotations
 
+import base64
 import json
 
-from worker.ai.groq_client import chat
-from worker.browser import navigate, settle
+from worker.ai.groq_client import chat, strip_code_fences
+from worker.browser import navigate, settle, wait_for_content
 
 _SYSTEM = """\
 You are a web API analyst. Given a list of XHR/fetch response shapes observed
@@ -41,91 +42,100 @@ If no suitable endpoint was found respond: {"found": false}
 """
 
 # Minimum response body size to consider — filters out tiny status pings
-_MIN_BODY_BYTES = 2048
+_MIN_BODY_BYTES = 1024
 
-# Resource types we care about
-_FETCH_TYPES = {"XHR", "Fetch"}
+# Maximum responses to send to the LLM (token budget)
+_MAX_CANDIDATES = 10
 
 
 async def scout(tab, *, url: str, vertical: str) -> dict | None:
     """
-    Navigate to `url` with network logging enabled, collect JSON responses,
+    Navigate to `url` while recording network traffic, collect JSON responses,
     ask Groq which one contains the listing. Returns a Tier-1 spec or None.
     """
-    await tab.enable_network_events()
-    await navigate(tab, url)
-    await settle(tab, 3)
+    from pydoll.protocol.network.types import ResourceType
 
-    captured = await _collect_json_responses(tab)
+    async with tab.request.record(
+        resource_types=[ResourceType.XHR, ResourceType.FETCH]
+    ) as capture:
+        await navigate(tab, url)
+        # Wait for the page to actually finish hydrating, not a fixed timer.
+        # Some sites (IMDb, Product Hunt, large SPAs) keep adding DOM for 10+s.
+        await wait_for_content(tab, max_wait=20.0)
 
+    captured = _extract_json_responses(capture.entries)
     if not captured:
         return None
 
     prompt = (
         f"Vertical: {vertical}\n"
         f"Page URL: {url}\n\n"
-        f"Captured XHR/fetch responses (up to 10 with JSON bodies ≥2 KB):\n"
-        + json.dumps(captured[:10], ensure_ascii=False)
+        f"Captured XHR/fetch responses (up to {_MAX_CANDIDATES} with JSON bodies):\n"
+        + json.dumps(captured[:_MAX_CANDIDATES], ensure_ascii=False)
     )
-    raw = await chat(prompt, system=_SYSTEM)
     try:
-        result = json.loads(raw)
-        if result.get("found") is False:
-            return None
-        # Validate minimum required fields
-        if not result.get("endpoint") or not result.get("fields"):
-            return None
-        return result
+        raw = await chat(prompt, system=_SYSTEM)
     except Exception:
+        # LLM unreachable / rate-limited / auth — caller logs, runner skips.
+        return None
+    try:
+        result = json.loads(strip_code_fences(raw))
+    except (json.JSONDecodeError, TypeError):
         return None
 
+    if result.get("found") is False:
+        return None
+    if not result.get("endpoint") or not result.get("fields"):
+        return None
+    return result
 
-async def _collect_json_responses(tab) -> list[dict]:
+
+def _extract_json_responses(entries: list[dict]) -> list[dict]:
     """
-    Pull all logged requests via get_network_logs(), fetch their bodies,
-    keep only those that parse as JSON and are large enough to be data.
+    From HAR entries, keep only those with JSON-parseable bodies large enough
+    to be data. Returns compact summaries suitable for LLM analysis.
     """
-    try:
-        logs = await tab.get_network_logs()
-    except Exception:
-        return []
-
-    captured: list[dict] = []
-
-    for log in logs:
-        params = log.get("params", {})
-        req_url: str = params.get("request", {}).get("url", "")
-        request_id: str = params.get("requestId", "")
-        resource_type: str = params.get("type", "")
-
-        if not request_id or not req_url:
-            continue
-        # Skip non-data resource types
-        if resource_type and resource_type not in _FETCH_TYPES:
-            continue
-        # Skip obviously non-API URLs
-        if any(ext in req_url for ext in (".js", ".css", ".png", ".jpg", ".svg", ".woff")):
-            continue
-
+    out: list[dict] = []
+    for entry in entries:
         try:
-            body = await tab.get_network_response_body(request_id)
+            response = entry.get("response") or {}
+            request = entry.get("request") or {}
+            content = response.get("content") or {}
+            body: str = content.get("text") or ""
+            if not body:
+                continue
+
+            # HAR may base64-encode binary bodies. Decode if so.
+            if content.get("encoding") == "base64":
+                try:
+                    body = base64.b64decode(body).decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+
+            if len(body) < _MIN_BODY_BYTES:
+                continue
+
+            mime: str = content.get("mimeType", "")
+            # Quick filter for likely JSON. Some APIs return text/plain.
+            if mime and ("json" not in mime.lower() and not body.lstrip().startswith(("{", "["))):
+                continue
+
+            try:
+                parsed = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            req_url = request.get("url", "")
+            if not req_url:
+                continue
+
+            out.append({
+                "url": req_url,
+                "shape": _summarise(parsed),
+            })
         except Exception:
             continue
-
-        if not body or len(body) < _MIN_BODY_BYTES:
-            continue
-
-        try:
-            parsed = json.loads(body)
-        except (json.JSONDecodeError, ValueError):
-            continue
-
-        captured.append({
-            "url": req_url,
-            "shape": _summarise(parsed),
-        })
-
-    return captured
+    return out
 
 
 def _summarise(obj, depth: int = 0) -> object:

@@ -20,6 +20,12 @@ RESEND_FROM = os.getenv("RESEND_FROM", "noreply@example.com")
 
 # Browser / scraper
 CHROME_STEALTH = os.getenv("CHROME_STEALTH", "true").lower() == "true"
+# CHROME_HEADLESS=true uses Chrome's "new" headless mode (close to headed, harder
+# to detect). On a Linux VPS without Xvfb this is required. On a VPS with Xvfb,
+# leave it false so Chrome runs headed against the virtual display.
+CHROME_HEADLESS = os.getenv("CHROME_HEADLESS", "false").lower() == "true"
+# CHROME_BINARY can override the executable (e.g. /usr/bin/google-chrome-stable)
+CHROME_BINARY = os.getenv("CHROME_BINARY", "")
 NAV_TIMEOUT = int(os.getenv("NAV_TIMEOUT_MS", "30000"))
 SETTLE_SECONDS = float(os.getenv("SETTLE_SECONDS", "3.0"))
 
