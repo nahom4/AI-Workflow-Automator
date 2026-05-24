@@ -2,6 +2,7 @@ import { db, initDb } from "@/lib/db";
 import { AutomationRow, LeadRow, RunRow } from "@/types/db";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import AutomationActions from "./AutomationActions";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,12 @@ export default async function AutomationDetailPage({
   const runs = runsResult.rows as unknown as RunRow[];
   const spec = JSON.parse(automation.spec_json);
 
+  const totalLeadsResult = await db().execute({
+    sql: "SELECT COUNT(*) as count FROM leads WHERE automation_id = ?",
+    args: [params.id],
+  });
+  const totalLeads = Number((totalLeadsResult.rows[0] as unknown as { count: number }).count ?? 0);
+
   return (
     <div className="max-w-2xl space-y-8">
       {/* Header */}
@@ -64,6 +71,7 @@ export default async function AutomationDetailPage({
           </div>
           <p className="text-gray-400 text-sm mt-1">{automation.intent_text}</p>
         </div>
+        <AutomationActions id={automation.id} status={automation.status} />
       </div>
 
       {/* Spec details */}
@@ -104,8 +112,16 @@ export default async function AutomationDetailPage({
       <div>
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-gray-500 uppercase tracking-wider">
-            Recent Leads ({leads.length})
+            Top Leads ({totalLeads} total)
           </p>
+          {totalLeads > 10 && (
+            <Link
+              href={`/automations/${automation.id}/leads`}
+              className="text-xs text-violet-400 hover:text-violet-300"
+            >
+              View all {totalLeads} →
+            </Link>
+          )}
         </div>
         {leads.length === 0 ? (
           <p className="text-gray-600 text-sm">No leads yet — runs will populate this.</p>

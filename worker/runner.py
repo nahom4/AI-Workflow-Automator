@@ -191,15 +191,15 @@ async def _fetch_items(
 
     tier1 = await network_sniff.scout(tab, url=url, vertical=vertical)
     if tier1:
-        await db.upsert_site_spec(domain, vertical, "api", tier1)
-        await _log(run_id, "info", f"{domain}: Tier-1 spec discovered — confirm in dashboard")
-        return []
+        await db.upsert_site_spec(domain, vertical, "api", tier1, user_confirmed=True)
+        await _log(run_id, "info", f"{domain}: Tier-1 spec found — extracting now")
+        return await _fetch_via_api_spec(tab, domain, tier1)
 
     tier2 = await pydantic_scout.scout(tab, url=url, vertical=vertical)
     if tier2:
-        await db.upsert_site_spec(domain, vertical, "pydantic", tier2)
-        await _log(run_id, "info", f"{domain}: Tier-2 spec discovered — confirm in dashboard")
-        return []
+        await db.upsert_site_spec(domain, vertical, "pydantic", tier2, user_confirmed=True)
+        await _log(run_id, "info", f"{domain}: Tier-2 spec found — extracting now")
+        return await _fetch_via_pydantic_spec(tab, domain, tier2)
 
     await _log(run_id, "warning", f"{domain}: scout found nothing — skipping this source")
     return []
