@@ -1,31 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { updateAutomationSchema } from "@/lib/validation";
+import { auth } from "@/auth";
 
-async function ensureDb() {
+async function getUserId(): Promise<string | null> {
+  const session = await auth();
+  return session?.user?.id ?? null;
+}
+
+async function ownedAutomation(id: string, userId: string) {
   await initDb();
+  const result = await db().execute({
+    sql: "SELECT * FROM automations WHERE id = ? AND user_id = ?",
+    args: [id, userId],
+  });
+  return result.rows[0] ?? null;
 }
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  await ensureDb();
-  const result = await db().execute({
-    sql: "SELECT * FROM automations WHERE id = ?",
-    args: [params.id],
-  });
-  if (!result.rows[0]) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json(result.rows[0]);
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const row = await ownedAutomation(params.id, userId);
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(row);
 }
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  await ensureDb();
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const existing = await ownedAutomation(params.id, userId);
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json().catch(() => null);
   const parsed = updateAutomationSchema.safeParse(body);
@@ -72,10 +84,15 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  await ensureDb();
+  const userId = await getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const existing = await ownedAutomation(params.id, userId);
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   await db().execute({
-    sql: "DELETE FROM automations WHERE id = ?",
-    args: [params.id],
+    sql: "DELETE FROM automations WHERE id = ? AND user_id = ?",
+    args: [params.id, userId],
   });
   return new NextResponse(null, { status: 204 });
 }

@@ -34,6 +34,7 @@ async function migrateDb(db: Client): Promise<void> {
     ["automations", "notify_whatsapp TEXT"],
     ["automations", "vertical TEXT NOT NULL DEFAULT 'other'"],
     ["automations", "last_run_at INTEGER"],
+    ["automations", "user_id TEXT REFERENCES users(id)"],
   ];
   for (const [table, colDef] of migrations) {
     try {
@@ -47,6 +48,14 @@ async function migrateDb(db: Client): Promise<void> {
 export async function initDb() {
   const db = getClient();
   await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      email         TEXT NOT NULL UNIQUE,
+      name          TEXT,
+      password_hash TEXT,
+      created_at    INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS automations (
       id              TEXT PRIMARY KEY,
       name            TEXT NOT NULL,

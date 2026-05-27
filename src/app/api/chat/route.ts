@@ -3,6 +3,7 @@ import Groq from "groq-sdk";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { db, initDb } from "@/lib/db";
+import { auth } from "@/auth";
 
 const chatRequestSchema = z.object({
   messages: z
@@ -104,6 +105,10 @@ const CONFIRMATION_RE =
   /\b(yes|yeah|yep|ok|okay|sure|go ahead|create|generate|build|make it|do it|let'?s|sounds good|perfect|great|confirm|proceed|continue|start it|set it up)\b/i;
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  const userId = session?.user?.id ?? null;
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -181,8 +186,8 @@ export async function POST(request: NextRequest) {
         await database.execute({
           sql: `INSERT INTO automations
                 (id, name, intent_text, vertical, spec_json, schedule_cron,
-                 notify_email, status, next_run_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+                 notify_email, status, next_run_at, created_at, updated_at, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
           args: [
             id,
             args.name as string,
@@ -194,6 +199,7 @@ export async function POST(request: NextRequest) {
             now,
             now,
             now,
+            userId,
           ],
         });
 
