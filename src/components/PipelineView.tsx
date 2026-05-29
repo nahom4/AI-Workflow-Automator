@@ -1,0 +1,264 @@
+"use client";
+
+import { useState } from "react";
+
+interface IntegrationConfig {
+  automationId: string;
+  googleSheetId: string | null;
+  notifyGmail: boolean;
+  hasGoogleToken: boolean;
+  userEmail: string | null;
+}
+
+interface Props {
+  sources: string[];
+  threshold: number;
+  vertical: string;
+  totalLeads: number;
+  integration: IntegrationConfig;
+}
+
+export default function PipelineView({ sources, threshold, vertical, totalLeads, integration }: Props) {
+  const [sheetId, setSheetId] = useState(integration.googleSheetId ?? "");
+  const [gmailOn, setGmailOn] = useState(integration.notifyGmail);
+  const [saving, setSaving] = useState<"sheets" | "gmail" | null>(null);
+  const [saved, setSaved] = useState<"sheets" | "gmail" | null>(null);
+
+  async function saveSheets() {
+    setSaving("sheets");
+    await fetch(`/api/automations/${integration.automationId}/integrations`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ google_sheet_id: sheetId }),
+    });
+    setSaving(null);
+    setSaved("sheets");
+    setTimeout(() => setSaved(null), 2000);
+  }
+
+  async function toggleGmail(val: boolean) {
+    setGmailOn(val);
+    setSaving("gmail");
+    await fetch(`/api/automations/${integration.automationId}/integrations`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notify_gmail: val }),
+    });
+    setSaving(null);
+    setSaved("gmail");
+    setTimeout(() => setSaved(null), 2000);
+  }
+
+  const sheetConfigured = (integration.googleSheetId || sheetId).length > 0;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500 uppercase tracking-wider">Data Pipeline</p>
+
+      {/* Flow diagram */}
+      <div className="relative overflow-x-auto pb-2">
+        <div className="flex items-stretch gap-0 min-w-max">
+
+          {/* Sources */}
+          <PipeNode
+            icon="🌐"
+            label="Sources"
+            color="violet"
+            badge={`${sources.length}`}
+          >
+            <ul className="space-y-0.5 mt-1">
+              {sources.map((s) => (
+                <li key={s} className="text-xs text-gray-400 truncate max-w-[120px]">{s}</li>
+              ))}
+            </ul>
+          </PipeNode>
+
+          <Arrow />
+
+          {/* Scraper */}
+          <PipeNode icon="🔍" label="Scraper" color="blue">
+            <p className="text-xs text-gray-400 mt-1">Tier 1 · API</p>
+            <p className="text-xs text-gray-400">Tier 2 · CSS</p>
+            <p className="text-xs text-gray-500">Tier 3 · Vision</p>
+          </PipeNode>
+
+          <Arrow />
+
+          {/* AI Ranker */}
+          <PipeNode icon="🤖" label="AI Ranker" color="indigo">
+            <p className="text-xs text-gray-400 mt-1">Groq LLM</p>
+            <p className="text-xs text-gray-500 capitalize">{vertical}</p>
+          </PipeNode>
+
+          <Arrow />
+
+          {/* Filter */}
+          <PipeNode icon="⚡" label="Filter" color="amber">
+            <p className="text-xs text-gray-400 mt-1">score ≥ {threshold}</p>
+            <p className="text-xs text-gray-500">{totalLeads} kept</p>
+          </PipeNode>
+
+          <Arrow />
+
+          {/* Outputs column */}
+          <div className="flex flex-col gap-2">
+            {/* Google Sheets */}
+            <OutputNode
+              icon="📊"
+              label="Google Sheets"
+              configured={sheetConfigured}
+              active={sheetConfigured}
+              noToken={!integration.hasGoogleToken}
+            />
+            {/* Gmail */}
+            <OutputNode
+              icon="📧"
+              label="Gmail"
+              configured={gmailOn}
+              active={gmailOn}
+              noToken={!integration.hasGoogleToken}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Integration config */}
+      {!integration.hasGoogleToken ? (
+        <div className="bg-gray-900 border border-gray-700 border-dashed rounded-xl p-4 text-sm text-gray-400">
+          <span className="text-amber-400 font-medium">Connect Google</span> — sign out and sign back in with Google to enable Sheets and Gmail outputs.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Sheets config */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-base">📊</span>
+              <p className="text-sm font-medium text-gray-200">Google Sheets</p>
+              {sheetConfigured && <span className="ml-auto text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded">active</span>}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-gray-500">Spreadsheet ID</label>
+              <input
+                value={sheetId}
+                onChange={(e) => setSheetId(e.target.value)}
+                placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              />
+              <p className="text-xs text-gray-600">
+                Found in the sheet URL: /spreadsheets/d/<span className="text-gray-400">ID</span>/edit
+              </p>
+            </div>
+            <button
+              onClick={saveSheets}
+              disabled={saving === "sheets"}
+              className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+            >
+              {saving === "sheets" ? "Saving…" : saved === "sheets" ? "Saved ✓" : "Save"}
+            </button>
+          </div>
+
+          {/* Gmail config */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-base">📧</span>
+              <p className="text-sm font-medium text-gray-200">Gmail</p>
+              {gmailOn && <span className="ml-auto text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded">active</span>}
+            </div>
+            <p className="text-xs text-gray-400">
+              Send a digest to <span className="text-gray-300">{integration.userEmail ?? "your Gmail"}</span> whenever new results are found.
+            </p>
+            <button
+              onClick={() => toggleGmail(!gmailOn)}
+              disabled={saving === "gmail"}
+              className={`w-full text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-50 ${
+                gmailOn
+                  ? "bg-gray-700 hover:bg-gray-600 text-gray-200"
+                  : "bg-violet-700 hover:bg-violet-600 text-white"
+              }`}
+            >
+              {saving === "gmail" ? "Saving…" : saved === "gmail" ? "Saved ✓" : gmailOn ? "Disable Gmail" : "Enable Gmail"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Arrow() {
+  return (
+    <div className="flex items-center px-1 self-center">
+      <div className="w-6 h-px bg-gray-700" />
+      <div className="w-0 h-0 border-t-4 border-b-4 border-l-6 border-t-transparent border-b-transparent border-l-gray-700" style={{ borderLeftWidth: 6 }} />
+    </div>
+  );
+}
+
+function PipeNode({
+  icon,
+  label,
+  color,
+  badge,
+  children,
+}: {
+  icon: string;
+  label: string;
+  color: "violet" | "blue" | "indigo" | "amber";
+  badge?: string;
+  children?: React.ReactNode;
+}) {
+  const borders: Record<string, string> = {
+    violet: "border-violet-800",
+    blue: "border-blue-800",
+    indigo: "border-indigo-800",
+    amber: "border-amber-800",
+  };
+  const icons: Record<string, string> = {
+    violet: "bg-violet-900/50",
+    blue: "bg-blue-900/50",
+    indigo: "bg-indigo-900/50",
+    amber: "bg-amber-900/50",
+  };
+  return (
+    <div className={`bg-gray-900 border ${borders[color]} rounded-xl p-3 min-w-[130px] flex flex-col`}>
+      <div className="flex items-center gap-2">
+        <span className={`text-lg leading-none p-1.5 rounded-lg ${icons[color]}`}>{icon}</span>
+        <span className="text-xs font-semibold text-gray-200">{label}</span>
+        {badge && (
+          <span className="ml-auto text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{badge}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function OutputNode({
+  icon,
+  label,
+  configured,
+  active,
+  noToken,
+}: {
+  icon: string;
+  label: string;
+  configured: boolean;
+  active: boolean;
+  noToken: boolean;
+}) {
+  return (
+    <div
+      className={`bg-gray-900 border rounded-xl p-3 min-w-[140px] flex items-center gap-2 ${
+        noToken
+          ? "border-gray-800 opacity-40"
+          : active
+          ? "border-green-700"
+          : "border-gray-700 border-dashed"
+      }`}
+    >
+      <span className="text-base">{icon}</span>
+      <span className="text-xs font-medium text-gray-300">{label}</span>
+      <span className={`ml-auto w-2 h-2 rounded-full flex-shrink-0 ${active ? "bg-green-400" : "bg-gray-700"}`} />
+    </div>
+  );
+}

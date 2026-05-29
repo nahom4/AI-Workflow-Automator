@@ -220,6 +220,41 @@ async def get_site_spec(domain: str, vertical: str) -> dict | None:
     return dict(zip(rs.columns, rs.rows[0]))
 
 
+async def get_user_email(user_id: str) -> str | None:
+    rs = await get_client().execute(
+        libsql_client.Statement("SELECT email FROM users WHERE id = ?", [user_id])
+    )
+    if not rs.rows:
+        return None
+    return dict(zip(rs.columns, rs.rows[0])).get("email")
+
+
+async def get_user_google_tokens(user_id: str) -> dict | None:
+    """Return {access_token, refresh_token, token_expiry} for a user, or None."""
+    rs = await get_client().execute(
+        libsql_client.Statement(
+            "SELECT google_access_token, google_refresh_token, google_token_expiry FROM users WHERE id = ?",
+            [user_id],
+        )
+    )
+    if not rs.rows:
+        return None
+    row = dict(zip(rs.columns, rs.rows[0]))
+    if not row.get("google_access_token"):
+        return None
+    return row
+
+
+async def update_google_access_token(user_id: str, access_token: str, expiry_ms: int) -> None:
+    """Persist a refreshed access token."""
+    await get_client().execute(
+        libsql_client.Statement(
+            "UPDATE users SET google_access_token = ?, google_token_expiry = ? WHERE id = ?",
+            [access_token, expiry_ms, user_id],
+        )
+    )
+
+
 async def upsert_site_spec(
     domain: str,
     vertical: str,

@@ -5,7 +5,7 @@ import os
 # Database (Turso in prod, local SQLite in dev)
 TURSO_URL = os.getenv("TURSO_DATABASE_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "data/automations.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH") or "data/automations.db"
 
 # Groq API keys — comma-separated for multi-key rotation
 _groq_keys_raw = os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", ""))

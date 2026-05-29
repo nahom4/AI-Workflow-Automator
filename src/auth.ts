@@ -36,6 +36,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      authorization: {
+        params: {
+          scope: [
+            "openid email profile",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/gmail.send",
+          ].join(" "),
+          access_type: "offline",
+          prompt: "consent",
+        },
+      },
     }),
   ],
 
@@ -48,15 +59,28 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           sql: "SELECT id FROM users WHERE email = ?",
           args: [user.email],
         });
+        let userId: string;
         if (existing.rows.length === 0) {
-          const id = nanoid();
+          userId = nanoid();
           await db().execute({
             sql: "INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?)",
-            args: [id, user.email, user.name ?? null, Date.now()],
+            args: [userId, user.email, user.name ?? null, Date.now()],
           });
-          user.id = id;
         } else {
-          user.id = existing.rows[0].id as string;
+          userId = existing.rows[0].id as string;
+        }
+        user.id = userId;
+        // Store OAuth tokens so worker can call Sheets / Gmail APIs
+        if (account.access_token) {
+          await db().execute({
+            sql: `UPDATE users SET google_access_token = ?, google_refresh_token = ?, google_token_expiry = ? WHERE id = ?`,
+            args: [
+              account.access_token,
+              account.refresh_token ?? null,
+              account.expires_at ? account.expires_at * 1000 : null,
+              userId,
+            ],
+          });
         }
       }
       return true;

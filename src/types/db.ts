@@ -4,6 +4,9 @@ export interface UserRow {
   name: string | null;
   password_hash: string | null;
   created_at: number;
+  google_access_token: string | null;
+  google_refresh_token: string | null;
+  google_token_expiry: number | null;
 }
 
 export interface AutomationRow {
@@ -15,6 +18,8 @@ export interface AutomationRow {
   schedule_cron: string;
   notify_email: string | null;
   notify_whatsapp: string | null;
+  google_sheet_id: string | null;
+  notify_gmail: number; // 0 | 1
   status: "active" | "paused" | "broken";
   last_run_at: number | null;
   next_run_at: number;

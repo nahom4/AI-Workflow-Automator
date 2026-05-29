@@ -14,6 +14,14 @@ import asyncio
 import signal
 import sys
 
+# Load .env.local (dev) then .env so config picks up GROQ_API_KEY, CHROME_BINARY, etc.
+try:
+    from dotenv import load_dotenv as _load
+    _load(".env.local", override=False)
+    _load(".env", override=False)
+except ImportError:
+    pass
+
 try:
     from rich.console import Console as _Console
     console = _Console()

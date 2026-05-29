@@ -11,10 +11,15 @@ from datetime import datetime, timezone
 import nanoid  # type: ignore
 from croniter import croniter  # type: ignore
 
+import os
+
 from worker import db
 from worker.ai.ranker import rank
 from worker.browser import make_chrome, start_browser
 from worker.notify.email import send_lead_digest
+from worker.notify import sheets as sheets_notify
+from worker.notify import gmail_api
+from worker.notify.google_auth import get_valid_token
 from worker.scout import network_sniff, pydantic_scout
 from worker.scout.validate import is_healthy
 
@@ -121,7 +126,7 @@ async def run_automation(automation: dict) -> None:
 
     await _log(run_id, "info", f"Kept {items_kept} / {items_seen} items ({len(new_leads)} new)")
 
-    # Notify
+    # Notify — Resend email
     if new_leads and automation.get("notify_email"):
         try:
             await send_lead_digest(
@@ -132,6 +137,68 @@ async def run_automation(automation: dict) -> None:
             await _log(run_id, "info", f"Email digest sent to {automation['notify_email']}")
         except Exception as exc:
             await _log(run_id, "warning", f"Email failed: {exc}")
+
+    # Google integrations — resolve user tokens once
+    user_id = automation.get("user_id")
+    google_sheet_id = automation.get("google_sheet_id")
+    notify_gmail = bool(automation.get("notify_gmail"))
+    _gtoken: str | None = None
+
+    async def _google_token() -> str | None:
+        nonlocal _gtoken
+        if _gtoken:
+            return _gtoken
+        if not user_id:
+            return None
+        tokens = await db.get_user_google_tokens(user_id)
+        if not tokens:
+            return None
+        client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+        client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            return None
+        _gtoken = await get_valid_token(
+            user_id=user_id,
+            tokens=tokens,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        return _gtoken
+
+    # Google Sheets
+    if new_leads and google_sheet_id:
+        try:
+            token = await _google_token()
+            if token:
+                n = await sheets_notify.append_leads(
+                    sheet_id=google_sheet_id,
+                    access_token=token,
+                    leads=new_leads,
+                )
+                await _log(run_id, "info", f"Wrote {n} row(s) to Google Sheet")
+            else:
+                await _log(run_id, "warning", "Google Sheets: no valid token — skipped")
+        except Exception as exc:
+            await _log(run_id, "warning", f"Google Sheets failed: {exc}")
+
+    # Gmail
+    if new_leads and notify_gmail and user_id:
+        try:
+            token = await _google_token()
+            if token:
+                sender = await db.get_user_email(user_id) or ""
+                await gmail_api.send_digest(
+                    to=sender,
+                    sender_email=sender,
+                    automation_name=automation["name"],
+                    leads=new_leads,
+                    access_token=token,
+                )
+                await _log(run_id, "info", f"Gmail digest sent to {sender}")
+            else:
+                await _log(run_id, "warning", "Gmail: no valid token — skipped")
+        except Exception as exc:
+            await _log(run_id, "warning", f"Gmail failed: {exc}")
 
     # Update schedule
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)

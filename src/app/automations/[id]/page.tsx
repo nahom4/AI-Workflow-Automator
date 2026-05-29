@@ -1,8 +1,11 @@
 import { db, initDb } from "@/lib/db";
-import { AutomationRow, LeadRow, RunRow } from "@/types/db";
+import { AutomationRow, LeadRow, RunRow, UserRow } from "@/types/db";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import AutomationActions from "./AutomationActions";
+import LiveLeads from "./LiveLeads";
+import PipelineView from "@/components/PipelineView";
+import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +27,8 @@ export default async function AutomationDetailPage({
   params: { id: string };
 }) {
   await initDb();
+  const session = await auth();
+  const userId = session?.user?.id ?? null;
 
   const [autoResult, leadsResult, runsResult] = await Promise.all([
     db().execute({ sql: "SELECT * FROM automations WHERE id = ?", args: [params.id] }),
@@ -48,10 +53,25 @@ export default async function AutomationDetailPage({
     sql: "SELECT COUNT(*) as count FROM leads WHERE automation_id = ?",
     args: [params.id],
   });
-  const totalLeads = Number((totalLeadsResult.rows[0] as unknown as { count: number }).count ?? 0);
+  const totalLeads = Number(
+    (totalLeadsResult.rows[0] as unknown as { count: number }).count ?? 0
+  );
+
+  // Check if user has Google tokens for Sheets/Gmail
+  let hasGoogleToken = false;
+  let userEmail: string | null = null;
+  if (userId) {
+    const userResult = await db().execute({
+      sql: "SELECT email, google_access_token FROM users WHERE id = ?",
+      args: [userId],
+    });
+    const user = userResult.rows[0] as unknown as Pick<UserRow, "email" | "google_access_token"> | undefined;
+    hasGoogleToken = !!(user?.google_access_token);
+    userEmail = user?.email ?? null;
+  }
 
   return (
-    <div className="max-w-2xl space-y-8">
+    <div className="max-w-4xl space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -74,8 +94,26 @@ export default async function AutomationDetailPage({
         <AutomationActions id={automation.id} status={automation.status} />
       </div>
 
+      {/* Pipeline */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <PipelineView
+          sources={spec.sources ?? []}
+          threshold={spec.threshold ?? 6}
+          vertical={automation.vertical}
+          totalLeads={totalLeads}
+          integration={{
+            automationId: automation.id,
+            googleSheetId: automation.google_sheet_id ?? null,
+            notifyGmail: !!automation.notify_gmail,
+            hasGoogleToken,
+            userEmail,
+          }}
+        />
+      </div>
+
       {/* Spec details */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-3">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Configuration</p>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Vertical</p>
@@ -109,44 +147,11 @@ export default async function AutomationDetailPage({
       </div>
 
       {/* Recent leads */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">
-            Top Leads ({totalLeads} total)
-          </p>
-          {totalLeads > 10 && (
-            <Link
-              href={`/automations/${automation.id}/leads`}
-              className="text-xs text-violet-400 hover:text-violet-300"
-            >
-              View all {totalLeads} →
-            </Link>
-          )}
-        </div>
-        {leads.length === 0 ? (
-          <p className="text-gray-600 text-sm">No leads yet — runs will populate this.</p>
-        ) : (
-          <div className="space-y-2">
-            {leads.map((lead) => (
-              <a
-                key={lead.id}
-                href={lead.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block bg-gray-900 border border-gray-800 rounded-lg p-3 hover:border-violet-700 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm text-gray-200 font-medium">{lead.title}</p>
-                  <span className="text-xs font-bold text-violet-400 flex-shrink-0">
-                    {lead.score.toFixed(1)}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 mt-0.5">{lead.source_domain}</p>
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
+      <LiveLeads
+        automationId={automation.id}
+        initial={leads}
+        initialTotal={totalLeads}
+      />
 
       {/* Recent runs */}
       <div>
@@ -164,7 +169,9 @@ export default async function AutomationDetailPage({
           )}
         </div>
         {runs.length === 0 ? (
-          <p className="text-gray-600 text-sm">No runs yet — the worker will pick this up within 30 seconds.</p>
+          <p className="text-gray-600 text-sm">
+            No runs yet — the worker will pick this up within 30 seconds.
+          </p>
         ) : (
           <div className="space-y-2">
             {runs.map((run) => (

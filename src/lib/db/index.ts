@@ -35,6 +35,11 @@ async function migrateDb(db: Client): Promise<void> {
     ["automations", "vertical TEXT NOT NULL DEFAULT 'other'"],
     ["automations", "last_run_at INTEGER"],
     ["automations", "user_id TEXT REFERENCES users(id)"],
+    ["automations", "google_sheet_id TEXT"],
+    ["automations", "notify_gmail INTEGER NOT NULL DEFAULT 0"],
+    ["users", "google_access_token TEXT"],
+    ["users", "google_refresh_token TEXT"],
+    ["users", "google_token_expiry INTEGER"],
   ];
   for (const [table, colDef] of migrations) {
     try {
