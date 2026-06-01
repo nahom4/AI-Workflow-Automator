@@ -20,20 +20,38 @@ interface Props {
 
 export default function PipelineView({ sources, threshold, vertical, totalLeads, integration }: Props) {
   const [sheetId, setSheetId] = useState(integration.googleSheetId ?? "");
+  const [sheetUrl, setSheetUrl] = useState(
+    integration.googleSheetId
+      ? `https://docs.google.com/spreadsheets/d/${integration.googleSheetId}/edit`
+      : null
+  );
   const [gmailOn, setGmailOn] = useState(integration.notifyGmail);
-  const [saving, setSaving] = useState<"sheets" | "gmail" | null>(null);
-  const [saved, setSaved] = useState<"sheets" | "gmail" | null>(null);
+  const [creatingSheet, setCreatingSheet] = useState(false);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const [saving, setSaving] = useState<"gmail" | null>(null);
+  const [saved, setSaved] = useState<"gmail" | null>(null);
 
-  async function saveSheets() {
-    setSaving("sheets");
-    await fetch(`/api/automations/${integration.automationId}/integrations`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ google_sheet_id: sheetId }),
+  async function createSheet() {
+    setCreatingSheet(true);
+    setSheetError(null);
+    const res = await fetch(`/api/automations/${integration.automationId}/integrations/sheets`, {
+      method: "POST",
     });
-    setSaving(null);
-    setSaved("sheets");
-    setTimeout(() => setSaved(null), 2000);
+    setCreatingSheet(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      setSheetError(data.error ?? "Failed to create spreadsheet");
+      return;
+    }
+    const data = await res.json() as { sheet_id: string; sheet_url: string };
+    setSheetId(data.sheet_id);
+    setSheetUrl(data.sheet_url);
+  }
+
+  async function disconnectSheet() {
+    await fetch(`/api/automations/${integration.automationId}/integrations/sheets`, { method: "DELETE" });
+    setSheetId("");
+    setSheetUrl(null);
   }
 
   async function toggleGmail(val: boolean) {
@@ -49,7 +67,7 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
     setTimeout(() => setSaved(null), 2000);
   }
 
-  const sheetConfigured = (integration.googleSheetId || sheetId).length > 0;
+  const sheetConfigured = sheetId.length > 0;
 
   return (
     <div className="space-y-4">
@@ -136,25 +154,41 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
               <p className="text-sm font-medium text-gray-200">Google Sheets</p>
               {sheetConfigured && <span className="ml-auto text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded">active</span>}
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-gray-500">Spreadsheet ID</label>
-              <input
-                value={sheetId}
-                onChange={(e) => setSheetId(e.target.value)}
-                placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-              />
-              <p className="text-xs text-gray-600">
-                Found in the sheet URL: /spreadsheets/d/<span className="text-gray-400">ID</span>/edit
-              </p>
-            </div>
-            <button
-              onClick={saveSheets}
-              disabled={saving === "sheets"}
-              className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
-            >
-              {saving === "sheets" ? "Saving…" : saved === "sheets" ? "Saved ✓" : "Save"}
-            </button>
+
+            {sheetConfigured && sheetUrl ? (
+              <div className="space-y-2">
+                <a
+                  href={sheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-xs text-violet-400 hover:text-violet-300 truncate"
+                >
+                  <span>↗</span>
+                  <span className="truncate">Open spreadsheet</span>
+                </a>
+                <p className="text-xs text-gray-500">New leads are appended automatically on each run.</p>
+                <button
+                  onClick={disconnectSheet}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-xs font-medium py-2 rounded-lg transition-colors"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400">
+                  Creates a new Google Spreadsheet in your Drive and appends a row for every new lead found.
+                </p>
+                {sheetError && <p className="text-xs text-red-400">{sheetError}</p>}
+                <button
+                  onClick={createSheet}
+                  disabled={creatingSheet}
+                  className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                >
+                  {creatingSheet ? "Creating…" : "Create Spreadsheet"}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Gmail config */}
