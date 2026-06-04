@@ -52,7 +52,7 @@ export async function POST(
   await initDb();
 
   const [autoRes, userRes] = await Promise.all([
-    db().execute({ sql: "SELECT * FROM automations WHERE id = ? AND user_id = ?", args: [params.id, userId] }),
+    db().execute({ sql: "SELECT * FROM automations WHERE id = ? AND (user_id = ? OR user_id IS NULL)", args: [params.id, userId] }),
     db().execute({ sql: "SELECT id, google_access_token, google_refresh_token, google_token_expiry FROM users WHERE id = ?", args: [userId] }),
   ]);
 
@@ -113,7 +113,7 @@ export async function DELETE(
 
   await initDb();
   const existing = await db().execute({
-    sql: "SELECT id FROM automations WHERE id = ? AND user_id = ?",
+    sql: "SELECT id FROM automations WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
     args: [params.id, userId],
   });
   if (!existing.rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });

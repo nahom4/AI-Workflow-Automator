@@ -18,7 +18,7 @@ export async function PATCH(
 
   await initDb();
   const existing = await db().execute({
-    sql: "SELECT id FROM automations WHERE id = ? AND user_id = ?",
+    sql: "SELECT id FROM automations WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
     args: [params.id, userId],
   });
   if (!existing.rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
