@@ -77,8 +77,17 @@ export async function POST(
   });
 
   if (!createRes.ok) {
-    const err = await createRes.text();
-    return NextResponse.json({ error: `Sheets API error: ${err.slice(0, 200)}` }, { status: 502 });
+    const errBody = await createRes.json().catch(() => null) as { error?: { message?: string } } | null;
+    const message = errBody?.error?.message ?? "";
+    // Extract the enable URL Google embeds in the error message
+    const enableUrlMatch = message.match(/https:\/\/console\.developers\.google\.com\/\S+/);
+    if (createRes.status === 403 && enableUrlMatch) {
+      return NextResponse.json(
+        { error: "api_not_enabled", enable_url: enableUrlMatch[0] },
+        { status: 403 }
+      );
+    }
+    return NextResponse.json({ error: message || "Sheets API error" }, { status: 502 });
   }
 
   const sheet = await createRes.json() as { spreadsheetId: string; spreadsheetUrl: string };

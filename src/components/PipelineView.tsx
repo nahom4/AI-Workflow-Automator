@@ -28,18 +28,25 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
   const [gmailOn, setGmailOn] = useState(integration.notifyGmail);
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const [needsEnable, setNeedsEnable] = useState(false);
   const [saving, setSaving] = useState<"gmail" | null>(null);
   const [saved, setSaved] = useState<"gmail" | null>(null);
 
   async function createSheet() {
     setCreatingSheet(true);
     setSheetError(null);
+    setNeedsEnable(false);
     const res = await fetch(`/api/automations/${integration.automationId}/integrations/sheets`, {
       method: "POST",
     });
     setCreatingSheet(false);
     if (!res.ok) {
-      const data = await res.json().catch(() => ({})) as { error?: string };
+      const data = await res.json().catch(() => ({})) as { error?: string; enable_url?: string };
+      if (data.error === "api_not_enabled" && data.enable_url) {
+        window.open(data.enable_url, "_blank");
+        setNeedsEnable(true);
+        return;
+      }
       setSheetError(data.error ?? "Failed to create spreadsheet");
       return;
     }
@@ -176,17 +183,34 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-xs text-gray-400">
-                  Creates a new Google Spreadsheet in your Drive and appends a row for every new lead found.
-                </p>
-                {sheetError && <p className="text-xs text-red-400">{sheetError}</p>}
-                <button
-                  onClick={createSheet}
-                  disabled={creatingSheet}
-                  className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
-                >
-                  {creatingSheet ? "Creating…" : "Create Spreadsheet"}
-                </button>
+                {needsEnable ? (
+                  <>
+                    <p className="text-xs text-amber-400">
+                      The Google Sheets API tab just opened. Enable it, then come back and click Retry.
+                    </p>
+                    <button
+                      onClick={createSheet}
+                      disabled={creatingSheet}
+                      className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                    >
+                      {creatingSheet ? "Creating…" : "Retry"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-400">
+                      Creates a new Google Spreadsheet in your Drive and appends a row for every new lead found.
+                    </p>
+                    {sheetError && <p className="text-xs text-red-400">{sheetError}</p>}
+                    <button
+                      onClick={createSheet}
+                      disabled={creatingSheet}
+                      className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                    >
+                      {creatingSheet ? "Creating…" : "Create Spreadsheet"}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
