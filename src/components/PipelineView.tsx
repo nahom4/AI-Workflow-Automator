@@ -29,6 +29,8 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [needsEnable, setNeedsEnable] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
   const [saving, setSaving] = useState<"gmail" | null>(null);
   const [saved, setSaved] = useState<"gmail" | null>(null);
 
@@ -53,6 +55,18 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
     const data = await res.json() as { sheet_id: string; sheet_url: string };
     setSheetId(data.sheet_id);
     setSheetUrl(data.sheet_url);
+  }
+
+  async function syncLeads() {
+    setSyncing(true);
+    setSyncResult(null);
+    const res = await fetch(
+      `/api/automations/${integration.automationId}/integrations/sheets/sync`,
+      { method: "POST" }
+    );
+    setSyncing(false);
+    const data = await res.json().catch(() => ({})) as { synced?: number; error?: string };
+    setSyncResult(res.ok ? `Synced ${data.synced} lead(s) ✓` : (data.error ?? "Sync failed"));
   }
 
   async function disconnectSheet() {
@@ -174,6 +188,18 @@ export default function PipelineView({ sources, threshold, vertical, totalLeads,
                   <span className="truncate">Open spreadsheet</span>
                 </a>
                 <p className="text-xs text-gray-500">New leads are appended automatically on each run.</p>
+                {syncResult && (
+                  <p className={`text-xs ${syncResult.includes("✓") ? "text-green-400" : "text-red-400"}`}>
+                    {syncResult}
+                  </p>
+                )}
+                <button
+                  onClick={syncLeads}
+                  disabled={syncing}
+                  className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                >
+                  {syncing ? "Syncing…" : "Sync all leads now"}
+                </button>
                 <button
                   onClick={disconnectSheet}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-xs font-medium py-2 rounded-lg transition-colors"
