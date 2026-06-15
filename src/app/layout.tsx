@@ -34,7 +34,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-gray-950 text-gray-100 antialiased`}
       >
-        <nav className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+        <nav className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/90 backdrop-blur-sm px-6 py-4 flex items-center justify-between">
           <Link
             href="/automations"
             className="text-violet-400 font-semibold text-lg tracking-tight hover:text-violet-300 transition-colors"

@@ -72,27 +72,27 @@ export default async function AutomationDetailPage({
 
   return (
     <div className="max-w-4xl space-y-8">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      {/* Sticky title header */}
+      <div className="sticky top-[65px] z-40 -mx-6 px-6 py-3 bg-gray-950/90 backdrop-blur-sm border-b border-gray-800/60 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
           <Link
             href="/automations"
-            className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+            className="text-gray-600 hover:text-gray-400 transition-colors flex-shrink-0 text-sm"
           >
-            ← All automations
+            ←
           </Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-2xl font-bold text-gray-100">{automation.name}</h1>
-            <span
-              className={`text-xs font-semibold px-2 py-0.5 rounded ${STATUS_STYLES[automation.status] ?? "bg-gray-800 text-gray-400"}`}
-            >
-              {automation.status}
-            </span>
-          </div>
-          <p className="text-gray-400 text-sm mt-1">{automation.intent_text}</p>
+          <h1 className="text-base font-semibold text-gray-100 truncate">{automation.name}</h1>
+          <span
+            className={`text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0 ${STATUS_STYLES[automation.status] ?? "bg-gray-800 text-gray-400"}`}
+          >
+            {automation.status}
+          </span>
         </div>
         <AutomationActions id={automation.id} status={automation.status} />
       </div>
+
+      {/* Intent subtitle */}
+      <p className="text-gray-400 text-sm -mt-4">{automation.intent_text}</p>
 
       {/* Pipeline */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
