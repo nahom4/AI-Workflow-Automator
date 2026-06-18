@@ -3,6 +3,7 @@ import { db, initDb } from "@/lib/db";
 import { createAutomationSchema } from "@/lib/validation";
 import { nanoid } from "nanoid";
 import { auth } from "@/auth";
+import { getUserPlan, countUserAutomations, cronMinIntervalHours } from "@/lib/plans";
 
 async function getUserId(): Promise<string | null> {
   const session = await auth();
@@ -35,6 +36,56 @@ export async function POST(req: NextRequest) {
 
   const { name, intent_text, vertical, spec_json, schedule_cron, notify_email, notify_whatsapp } =
     parsed.data;
+
+  const plan = await getUserPlan(userId);
+
+  const currentCount = await countUserAutomations(userId);
+  if (currentCount >= plan.maxAutomations) {
+    return NextResponse.json(
+      {
+        error: `You've reached your plan limit of ${plan.maxAutomations} automations. Upgrade to Pro for up to 15.`,
+        code: "PLAN_LIMIT_AUTOMATIONS",
+      },
+      { status: 402 },
+    );
+  }
+
+  const intervalHours = cronMinIntervalHours(schedule_cron);
+  if (intervalHours < plan.minScheduleHours) {
+    return NextResponse.json(
+      {
+        error: `Your plan only allows runs every ${plan.minScheduleHours} hours or longer. Upgrade to Pro for more frequent runs.`,
+        code: "PLAN_LIMIT_FREQUENCY",
+      },
+      { status: 402 },
+    );
+  }
+
+  const specCriteria = Array.isArray((spec_json as { criteria?: unknown[] }).criteria)
+    ? ((spec_json as { criteria?: unknown[] }).criteria as unknown[]).length
+    : 0;
+  if (specCriteria > plan.maxCriteriaPerAutomation) {
+    return NextResponse.json(
+      {
+        error: `Your plan allows up to ${plan.maxCriteriaPerAutomation} criteria per automation. Upgrade to Pro for more.`,
+        code: "PLAN_LIMIT_CRITERIA",
+      },
+      { status: 402 },
+    );
+  }
+
+  const specSources = Array.isArray((spec_json as { sources?: unknown[] }).sources)
+    ? ((spec_json as { sources?: unknown[] }).sources as unknown[]).length
+    : 0;
+  if (specSources > plan.maxSourcesPerAutomation) {
+    return NextResponse.json(
+      {
+        error: `Your plan allows up to ${plan.maxSourcesPerAutomation} sources per automation. Upgrade to Pro for more.`,
+        code: "PLAN_LIMIT_SOURCES",
+      },
+      { status: 402 },
+    );
+  }
 
   const id = nanoid(10);
   const now = Date.now();

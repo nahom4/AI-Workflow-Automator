@@ -40,6 +40,11 @@ async function migrateDb(db: Client): Promise<void> {
     ["users", "google_access_token TEXT"],
     ["users", "google_refresh_token TEXT"],
     ["users", "google_token_expiry INTEGER"],
+    ["users", "plan TEXT NOT NULL DEFAULT 'free'"],
+    ["users", "paddle_customer_id TEXT"],
+    ["users", "paddle_subscription_id TEXT"],
+    ["users", "subscription_status TEXT"],
+    ["users", "subscription_period_end INTEGER"],
   ];
   for (const [table, colDef] of migrations) {
     try {

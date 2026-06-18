@@ -7,9 +7,12 @@ export default auth((req) => {
 
   // Public paths that don't need auth
   const isPublic =
+    pathname === "/" ||
+    pathname.startsWith("/pricing") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/signup") ||
-    pathname.startsWith("/api/auth");
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/billing/webhook");
 
   if (!isLoggedIn && !isPublic) {
     const loginUrl = new URL("/login", req.url);

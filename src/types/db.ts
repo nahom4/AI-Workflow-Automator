@@ -7,6 +7,11 @@ export interface UserRow {
   google_access_token: string | null;
   google_refresh_token: string | null;
   google_token_expiry: number | null;
+  plan: "free" | "pro";
+  paddle_customer_id: string | null;
+  paddle_subscription_id: string | null;
+  subscription_status: "active" | "past_due" | "paused" | "canceled" | null;
+  subscription_period_end: number | null;
 }
 
 export interface AutomationRow {

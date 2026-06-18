@@ -14,6 +14,16 @@ GROQ_API_KEYS: list[str] = [k.strip() for k in _groq_keys_raw.split(",") if k.st
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_REQUEST_INTERVAL = float(os.getenv("GROQ_REQUEST_INTERVAL", "4.5"))
 
+# Gemini API keys — comma-separated for multi-key rotation. Used by the
+# vision-scout backend (free tier: 20 req/day per key on 2.5-flash).
+_gemini_keys_raw = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", ""))
+GEMINI_API_KEYS: list[str] = [k.strip() for k in _gemini_keys_raw.split(",") if k.strip()]
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Scout backend: "pydantic" (legacy heuristic + LLM-pick) or "vision"
+# (pydoll screenshot → Gemini bbox → DOM map → CSS selector).
+SCOUT_BACKEND = os.getenv("SCOUT_BACKEND", "pydantic").lower()
+
 # Resend
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM = os.getenv("RESEND_FROM", "noreply@example.com")
