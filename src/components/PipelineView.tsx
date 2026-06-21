@@ -320,13 +320,12 @@ function PipeNode({
 function OutputNode({
   icon,
   label,
-  configured,
   active,
   noToken,
 }: {
   icon: string;
   label: string;
-  configured: boolean;
+  configured?: boolean;
   active: boolean;
   noToken: boolean;
 }) {
