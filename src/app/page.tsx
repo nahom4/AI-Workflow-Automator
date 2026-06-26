@@ -255,6 +255,15 @@ export default async function HomePage() {
             <Link href="/pricing" className="hover:text-gray-300 transition-colors">
               Pricing
             </Link>
+            <Link href="/terms" className="hover:text-gray-300 transition-colors">
+              Terms
+            </Link>
+            <Link href="/privacy" className="hover:text-gray-300 transition-colors">
+              Privacy
+            </Link>
+            <Link href="/refund" className="hover:text-gray-300 transition-colors">
+              Refunds
+            </Link>
             <Link href="/login" className="hover:text-gray-300 transition-colors">
               Sign in
             </Link>
