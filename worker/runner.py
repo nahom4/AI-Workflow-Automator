@@ -274,11 +274,37 @@ async def _fetch_items(
     The URL that finally produces a spec is saved as `entry_url` in the spec
     so subsequent runs go straight there.
     """
-    from worker.adapters import remoteok, upwork
+    from worker.adapters import (
+        remoteok, upwork, remotive, weworkremotely,
+        devto, github_trending, paperswithcode,
+    )
+    from worker.adapters import arxiv, hn
 
     # Pre-built browser-free adapters
     if domain == remoteok.DOMAIN:
         return await remoteok.fetch_items()
+
+    if domain == remotive.DOMAIN:
+        return await remotive.fetch_items()
+
+    if domain == weworkremotely.DOMAIN:
+        return await weworkremotely.fetch_items()
+
+    if domain == devto.DOMAIN:
+        return await devto.fetch_items()
+
+    if domain == github_trending.DOMAIN and vertical == github_trending.VERTICAL:
+        return await github_trending.fetch_items()
+
+    if domain == paperswithcode.DOMAIN:
+        return await paperswithcode.fetch_items()
+
+    if domain == arxiv.DOMAIN:
+        return await arxiv.fetch_items()
+
+    if domain in (hn.DOMAIN, "news.ycombinator.com"):
+        listing = "showstories" if vertical == "products" else "topstories"
+        return await hn.fetch_items(listing=listing)
 
     if domain == upwork.DOMAIN and vertical == upwork.VERTICAL:
         query = spec.get("query") or " ".join(spec.get("criteria", []))
