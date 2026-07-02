@@ -37,7 +37,7 @@ export default function RefundPage() {
                 </a>{" "}
                 from the address associated with your account
               </li>
-              <li>Include the subject line: "Refund Request"</li>
+              <li>Include the subject line: &ldquo;Refund Request&rdquo;</li>
               <li>Briefly describe the reason for your request</li>
             </ol>
             <p className="mt-3">

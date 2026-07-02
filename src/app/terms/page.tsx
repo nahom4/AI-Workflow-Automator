@@ -17,7 +17,7 @@ export default function TermsPage() {
           <div>
             <h2 className="text-lg font-semibold text-white mb-2">1. Acceptance of Terms</h2>
             <p>
-              By accessing or using AI Workflow Automator ("Service"), you agree to be bound by these
+              By accessing or using AI Workflow Automator (&ldquo;Service&rdquo;), you agree to be bound by these
               Terms of Service. If you do not agree, do not use the Service.
             </p>
           </div>
@@ -77,7 +77,7 @@ export default function TermsPage() {
               7. Disclaimer of Warranties
             </h2>
             <p>
-              The Service is provided "as is" without warranties of any kind, express or implied,
+              The Service is provided &ldquo;as is&rdquo; without warranties of any kind, express or implied,
               including merchantability, fitness for a particular purpose, or non-infringement. We do
               not guarantee uninterrupted or error-free operation.
             </p>
