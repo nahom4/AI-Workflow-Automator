@@ -9,10 +9,14 @@ export default auth((req) => {
   const isPublic =
     pathname === "/" ||
     pathname.startsWith("/pricing") ||
+    pathname.startsWith("/terms") ||
+    pathname.startsWith("/privacy") ||
+    pathname.startsWith("/refund") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/signup") ||
     pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/billing/webhook");
+    pathname.startsWith("/api/billing/webhook") ||
+    pathname.startsWith("/api/billing/crypto-webhook");
 
   if (!isLoggedIn && !isPublic) {
     const loginUrl = new URL("/login", req.url);
