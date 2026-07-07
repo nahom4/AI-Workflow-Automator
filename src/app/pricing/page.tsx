@@ -131,9 +131,10 @@ export default async function PricingPage() {
               cataloging — fewer good leads filtered out, fewer junk leads slipping through.
             </Faq>
             <Faq q="What payment methods do you accept?">
-              All major credit and debit cards via Paddle. We also accept crypto —
-              Bitcoin, Ethereum, USDC, and more — through Coinbase Commerce. Choose your
-              preferred method at checkout.
+              Right now: USDC on Base. Connect your wallet (MetaMask, Coinbase Wallet,
+              or any web3 wallet), sign a payment authorization, and we cover the gas.
+              Activation is instant — no waiting for card processor confirmation. Card
+              payments are in final verification with our processor and will be enabled soon.
             </Faq>
             <Faq q="Can I switch between monthly and annual later?">
               Yes. Switch from your account page. Annual gives you a 20% discount and is

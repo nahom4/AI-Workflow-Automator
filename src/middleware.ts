@@ -16,9 +16,14 @@ export default auth((req) => {
     pathname.startsWith("/signup") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/billing/webhook") ||
-    pathname.startsWith("/api/billing/crypto-webhook");
+    pathname.startsWith("/api/billing/crypto-webhook") ||
+    pathname.startsWith("/api/billing/x402-info");
 
   if (!isLoggedIn && !isPublic) {
+    // API routes get a JSON 401; HTML routes get a redirect to /login.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
