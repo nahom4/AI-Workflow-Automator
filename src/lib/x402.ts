@@ -23,7 +23,6 @@ import { base } from "viem/chains";
 
 // USDC native on Base mainnet (6 decimals).
 export const USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
-const USDC_DECIMALS = 6;
 
 // Prices in 6-decimal USDC base units (USDC has 6 decimals on Base).
 const PRICE_BY_CYCLE = {
