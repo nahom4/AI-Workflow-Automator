@@ -1,5 +1,6 @@
 import { db, initDb } from "@/lib/db";
 import { AutomationRow, RunRow } from "@/types/db";
+import { auth } from "@/auth";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -17,10 +18,13 @@ export default async function RunsPage({
   params: { id: string };
 }) {
   await initDb();
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) notFound();
 
   const automationResult = await db().execute({
-    sql: "SELECT * FROM automations WHERE id = ?",
-    args: [params.id],
+    sql: "SELECT * FROM automations WHERE id = ? AND user_id = ?",
+    args: [params.id, userId],
   });
   const automation = automationResult.rows[0] as unknown as AutomationRow | undefined;
   if (!automation) notFound();

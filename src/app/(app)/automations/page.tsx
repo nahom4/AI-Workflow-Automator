@@ -1,5 +1,7 @@
 import { db, initDb } from "@/lib/db";
 import { AutomationRow } from "@/types/db";
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +20,15 @@ const VERTICAL_ICONS: Record<string, string> = {
 };
 
 export default async function AutomationsPage() {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) redirect("/login?callbackUrl=/automations");
+
   await initDb();
-  const result = await db().execute(
-    "SELECT * FROM automations ORDER BY created_at DESC"
-  );
+  const result = await db().execute({
+    sql: "SELECT * FROM automations WHERE user_id = ? ORDER BY created_at DESC",
+    args: [userId],
+  });
   const automations = result.rows as unknown as AutomationRow[];
 
   if (automations.length === 0) {

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { sseChannel } from "@/lib/sse";
+import { auth } from "@/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,11 +10,17 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { runId: string } }
 ) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return new Response("Unauthorized", { status: 401 });
+
   await initDb();
 
   const result = await db().execute({
-    sql: "SELECT id, status FROM runs WHERE id = ?",
-    args: [params.runId],
+    sql: `SELECT r.id, r.status FROM runs r
+          JOIN automations a ON a.id = r.automation_id
+          WHERE r.id = ? AND a.user_id = ?`,
+    args: [params.runId, userId],
   });
 
   const run = result.rows[0];

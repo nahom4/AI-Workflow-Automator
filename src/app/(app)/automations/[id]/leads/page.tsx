@@ -1,5 +1,6 @@
 import { db, initDb } from "@/lib/db";
 import { AutomationRow, LeadRow } from "@/types/db";
+import { auth } from "@/auth";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -13,13 +14,19 @@ export default async function LeadsPage({
   searchParams: { page?: string };
 }) {
   await initDb();
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) notFound();
 
   const PAGE_SIZE = 50;
   const page = Math.max(1, parseInt(searchParams.page ?? "1", 10));
   const offset = (page - 1) * PAGE_SIZE;
 
   const [autoResult, leadsResult, countResult] = await Promise.all([
-    db().execute({ sql: "SELECT id, name FROM automations WHERE id = ?", args: [params.id] }),
+    db().execute({
+      sql: "SELECT id, name FROM automations WHERE id = ? AND user_id = ?",
+      args: [params.id, userId],
+    }),
     db().execute({
       sql: "SELECT * FROM leads WHERE automation_id = ? ORDER BY score DESC, created_at DESC LIMIT ? OFFSET ?",
       args: [params.id, PAGE_SIZE, offset],

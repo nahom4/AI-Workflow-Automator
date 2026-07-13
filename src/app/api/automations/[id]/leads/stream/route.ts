@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { LeadRow } from "@/types/db";
+import { auth } from "@/auth";
 
 // Server-sent events: pushes new leads as they're inserted by the worker.
 // Uses a small polling interval against the leads table (~1s) and emits
@@ -27,12 +28,15 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return new Response("unauthorized", { status: 401 });
+
   await initDb();
 
-  // Verify automation exists.
   const check = await db().execute({
-    sql: "SELECT id FROM automations WHERE id = ?",
-    args: [params.id],
+    sql: "SELECT id FROM automations WHERE id = ? AND user_id = ?",
+    args: [params.id, userId],
   });
   if (!check.rows[0]) {
     return new Response("not found", { status: 404 });

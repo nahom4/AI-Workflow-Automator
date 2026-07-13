@@ -29,9 +29,13 @@ export default async function AutomationDetailPage({
   await initDb();
   const session = await auth();
   const userId = session?.user?.id ?? null;
+  if (!userId) notFound();
 
   const [autoResult, leadsResult, runsResult] = await Promise.all([
-    db().execute({ sql: "SELECT * FROM automations WHERE id = ?", args: [params.id] }),
+    db().execute({
+      sql: "SELECT * FROM automations WHERE id = ? AND user_id = ?",
+      args: [params.id, userId],
+    }),
     db().execute({
       sql: "SELECT * FROM leads WHERE automation_id = ? ORDER BY score DESC LIMIT 10",
       args: [params.id],
