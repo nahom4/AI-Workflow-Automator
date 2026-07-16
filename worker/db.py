@@ -73,12 +73,40 @@ _SCHEMA_STMTS = [
     )""",
     """CREATE TABLE IF NOT EXISTS run_logs (
       id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-      level TEXT NOT NULL, message TEXT NOT NULL, created_at INTEGER NOT NULL
+      level TEXT NOT NULL, message TEXT NOT NULL, created_at INTEGER NOT NULL,
+      stage TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS llm_calls (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+      automation_id TEXT REFERENCES automations(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      provider TEXT NOT NULL,         -- 'groq' | 'gemini' | future
+      model TEXT NOT NULL,
+      purpose TEXT NOT NULL,          -- 'rank' | 'scout' | 'enrich' | ...
+      tokens_in INTEGER DEFAULT 0,
+      tokens_out INTEGER DEFAULT 0,
+      cost_cents REAL DEFAULT 0,
+      latency_ms INTEGER DEFAULT 0,
+      status TEXT NOT NULL,           -- 'success' | 'error' | 'retry'
+      error TEXT,
+      created_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at, status)",
     "CREATE INDEX IF NOT EXISTS idx_leads_automation_id ON leads(automation_id)",
     "CREATE INDEX IF NOT EXISTS idx_runs_automation_id ON runs(automation_id)",
     "CREATE INDEX IF NOT EXISTS idx_run_logs_run_id ON run_logs(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_run_logs_stage ON run_logs(run_id, stage)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_calls_run ON llm_calls(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_calls_user_day ON llm_calls(user_id, created_at)",
+]
+
+# One-shot migrations to add columns that landed after the table was first
+# created. SQLite/libSQL has no IF NOT EXISTS for ADD COLUMN; we swallow the
+# duplicate-column error so this stays idempotent.
+_MIGRATIONS = [
+    "ALTER TABLE run_logs ADD COLUMN stage TEXT",
+    "ALTER TABLE runs ADD COLUMN total_cost_cents REAL DEFAULT 0",
 ]
 
 
@@ -87,6 +115,16 @@ async def ensure_schema() -> None:
     client = get_client()
     for stmt in _SCHEMA_STMTS:
         await client.execute(libsql_client.Statement(stmt))
+    # Run additive migrations; ignore "duplicate column" errors so this is
+    # idempotent across deploys.
+    for stmt in _MIGRATIONS:
+        try:
+            await client.execute(libsql_client.Statement(stmt))
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "duplicate column" in msg or "already exists" in msg:
+                continue
+            raise
 
 
 async def fetch_due_automations() -> list[dict]:
@@ -137,17 +175,61 @@ async def finish_run(
     )
 
 
-async def append_run_log(run_id: str, level: str, message: str) -> None:
+async def append_run_log(run_id: str, level: str, message: str, *, stage: str | None = None) -> None:
     import nanoid  # type: ignore
 
     now = int(time.time() * 1000)
     log_id = nanoid.generate(size=10)
     await get_client().execute(
         libsql_client.Statement(
-            "INSERT INTO run_logs (id, run_id, level, message, created_at) VALUES (?, ?, ?, ?, ?)",
-            [log_id, run_id, level, message, now],
+            "INSERT INTO run_logs (id, run_id, level, message, created_at, stage) VALUES (?, ?, ?, ?, ?, ?)",
+            [log_id, run_id, level, message, now, stage],
         )
     )
+
+
+async def record_llm_call(
+    *,
+    run_id: str | None,
+    automation_id: str | None,
+    user_id: str | None,
+    provider: str,
+    model: str,
+    purpose: str,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    cost_cents: float = 0.0,
+    latency_ms: int = 0,
+    status: str = "success",
+    error: str | None = None,
+) -> None:
+    """Persist a single LLM call for cost + observability accounting.
+
+    Also folds the cost back into runs.total_cost_cents so the per-run total
+    is queryable without joining llm_calls.
+    """
+    import nanoid  # type: ignore
+
+    now = int(time.time() * 1000)
+    call_id = nanoid.generate(size=12)
+    client = get_client()
+    await client.execute(
+        libsql_client.Statement(
+            """INSERT INTO llm_calls
+               (id, run_id, automation_id, user_id, provider, model, purpose,
+                tokens_in, tokens_out, cost_cents, latency_ms, status, error, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [call_id, run_id, automation_id, user_id, provider, model, purpose,
+             tokens_in, tokens_out, cost_cents, latency_ms, status, error, now],
+        )
+    )
+    if run_id and cost_cents:
+        await client.execute(
+            libsql_client.Statement(
+                "UPDATE runs SET total_cost_cents = COALESCE(total_cost_cents, 0) + ? WHERE id = ?",
+                [cost_cents, run_id],
+            )
+        )
 
 
 async def update_automation_schedule(

@@ -1,9 +1,11 @@
-"""Minimal Gemini client for vision bbox grounding.
+"""Gemini client — vision bbox grounding + async text-only fallback ranker.
 
-We only need the one capability — "given a screenshot, return bounding boxes
-for the main repeating listings" — so this is plain `requests` calls, not the
-google-generativeai SDK. Multi-key rotation handles per-key daily quotas
-(20 req/day on free tier 2.5-flash).
+Sync paths (`detect_listing_bboxes`, `pick_listing_selectors`) use `requests`
+because they're called from within `asyncio.to_thread` already.
+
+Async path (`chat_text_metered`) uses `httpx.AsyncClient` so the metrics
+recording can stay async-native. It's wrapped in tenacity and writes to the
+`llm_calls` table via the observability shim.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import base64
 import json
 import time
 
+import httpx
 import requests
 
 from worker.config import GEMINI_API_KEYS, GEMINI_MODEL
@@ -86,6 +89,125 @@ _BBOX_PROMPT = (
 
 class GeminiUnavailable(Exception):
     """All keys exhausted or no keys configured."""
+
+
+def chat_text(prompt: str, *, system: str = "", json_mode: bool = True, temperature: float = 0.0) -> str:
+    """Legacy sync wrapper kept for back-compat. Prefer `chat_text_metered`
+    when calling from async code so cost/latency metrics are recorded.
+    """
+    if not GEMINI_API_KEYS:
+        raise GeminiUnavailable("no GEMINI_API_KEYS configured")
+    body = _build_chat_body(prompt, system=system, json_mode=json_mode, temperature=temperature)
+    parsed, status, body_trimmed = _post_gemini(body)
+    if status == 200 and parsed is not None:
+        return _extract_model_text(parsed)
+    raise GeminiUnavailable(
+        f"chat_text exhausted (last status={status}): {(body_trimmed or '')[:200]}"
+    )
+
+
+def _build_chat_body(prompt: str, *, system: str, json_mode: bool, temperature: float) -> dict:
+    user_text = prompt if not system else f"{system}\n\n{prompt}"
+    body: dict = {
+        "contents": [{"parts": [{"text": user_text}]}],
+        "generationConfig": {
+            "temperature": temperature,
+            # Disable thinking — for a structured ranker prompt, thinking
+            # adds 5-10s per call with no quality gain.
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    if json_mode:
+        body["generationConfig"]["responseMimeType"] = "application/json"
+    return body
+
+
+async def chat_text_metered(
+    prompt: str,
+    *,
+    system: str = "",
+    json_mode: bool = True,
+    temperature: float = 0.0,
+    purpose: str = "rank",
+) -> str:
+    """Async Gemini chat with key rotation, retry-on-503/429, and cost/latency
+    tracking via the `llm_calls` observability shim.
+
+    Raises GeminiUnavailable if every key is exhausted.
+    """
+    # Lazy imports to avoid circular dependency at module load
+    from worker.obs.metrics import observe_llm_call
+
+    if not GEMINI_API_KEYS:
+        raise GeminiUnavailable("no GEMINI_API_KEYS configured")
+
+    body = _build_chat_body(prompt, system=system, json_mode=json_mode, temperature=temperature)
+    last_status: int | None = None
+    last_body: str | None = None
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        for key in GEMINI_API_KEYS:
+            url = f"{_API_BASE}/models/{GEMINI_MODEL}:generateContent?key={key}"
+            for attempt in range(1 + len(_RETRY_DELAYS)):
+                if attempt > 0:
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(_RETRY_DELAYS[attempt - 1])
+                start = time.time()
+                try:
+                    r = await client.post(url, json=body)
+                except httpx.RequestError as exc:
+                    last_status, last_body = -1, repr(exc)
+                    await observe_llm_call(
+                        provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                        latency_ms=int((time.time() - start) * 1000),
+                        status="error", error=last_body[:300],
+                    )
+                    break  # next key
+                latency_ms = int((time.time() - start) * 1000)
+                last_status = r.status_code
+                last_body = (r.text or "")[:300]
+                if r.status_code == 200:
+                    try:
+                        parsed = r.json()
+                    except ValueError:
+                        await observe_llm_call(
+                            provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                            latency_ms=latency_ms, status="error",
+                            error="invalid JSON in 200 response",
+                        )
+                        return ""
+                    usage = parsed.get("usageMetadata") or {}
+                    await observe_llm_call(
+                        provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                        tokens_in=int(usage.get("promptTokenCount") or 0),
+                        tokens_out=int(usage.get("candidatesTokenCount") or 0),
+                        latency_ms=latency_ms, status="success",
+                    )
+                    return _extract_model_text(parsed)
+                if r.status_code == 429 and _is_hard_quota_429(r.text):
+                    await observe_llm_call(
+                        provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                        latency_ms=latency_ms, status="error",
+                        error=f"daily-quota 429: {last_body[:200]}",
+                    )
+                    break  # rotate immediately
+                if r.status_code in (429, 503):
+                    await observe_llm_call(
+                        provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                        latency_ms=latency_ms, status="retry",
+                        error=f"transient {r.status_code}",
+                    )
+                    continue  # backoff + retry same key
+                await observe_llm_call(
+                    provider="gemini", model=GEMINI_MODEL, purpose=purpose,
+                    latency_ms=latency_ms, status="error",
+                    error=f"{r.status_code}: {last_body[:200]}",
+                )
+                break  # 4xx auth/malformed — try next key
+
+    raise GeminiUnavailable(
+        f"chat_text_metered exhausted (last status={last_status}): {(last_body or '')[:200]}"
+    )
 
 
 def detect_listing_bboxes(png_bytes: bytes) -> list[dict]:

@@ -19,8 +19,45 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Literal
+
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from worker.ai.groq_client import chat
+from worker.ai import gemini_client
+from worker.obs.logging import get_logger
+
+_rank_log = get_logger("worker.ai.ranker")
+
+
+class _CriterionVerdict(BaseModel):
+    """One criterion's met/partial/unmet judgement from the LLM."""
+
+    criterion: str
+    verdict: Literal["met", "partial", "unmet"]
+    evidence: str = ""
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _normalize_verdict(cls, v):
+        s = str(v or "").strip().lower()
+        return s if s in {"met", "partial", "unmet"} else "unmet"
+
+
+class RankResult(BaseModel):
+    """Validated shape of the ranker's LLM output."""
+
+    score: float = Field(ge=0, le=10)
+    summary: str = ""
+    per_criterion: list[_CriterionVerdict] = Field(default_factory=list)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _coerce_score(cls, v):
+        try:
+            return max(0.0, min(10.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
 
 
 _SYSTEM = """\
@@ -114,51 +151,67 @@ async def rank(
         f"{json.dumps(item_for_prompt, ensure_ascii=False, indent=2)}"
     )
 
+    async def _call_llm(p: str) -> str:
+        try:
+            return await chat(p, system=_SYSTEM, temperature=0.0, purpose="rank")
+        except Exception as groq_exc:
+            try:
+                return await gemini_client.chat_text_metered(
+                    p, system=_SYSTEM, json_mode=True, temperature=0.0, purpose="rank",
+                )
+            except Exception as gem_exc:
+                raise RuntimeError(
+                    f"groq={str(groq_exc)[:80]}; gemini={str(gem_exc)[:120]}"
+                ) from gem_exc
+
     try:
-        raw = await chat(prompt, system=_SYSTEM, temperature=0.0)
-    except Exception as exc:
-        return 0.0, [f"[error] ranker LLM error: {exc}"]
+        raw = await _call_llm(prompt)
+    except RuntimeError as both_exc:
+        # Both LLMs down — return a neutral pass-through score so the pipeline
+        # keeps producing leads (unranked, clearly labeled).
+        return threshold, [f"[unranked] LLM unavailable ({str(both_exc)[:200]})"]
 
-    parsed = _extract_json_object(raw)
-    if parsed is None:
-        return 0.0, [f"[error] unparseable LLM response: {raw[:160]!r}"]
+    result = _parse_to_schema(raw)
+    if result is None:
+        # One-shot corrective retry: feed the LLM the parse error so it
+        # returns a valid object instead of prose / malformed JSON.
+        corrective = (
+            f"{prompt}\n\nYOUR PREVIOUS RESPONSE WAS NOT VALID JSON FOR THE REQUIRED SCHEMA. "
+            f"Return ONLY a JSON object with keys: score (number 1-10), summary (string), "
+            f"per_criterion (array of {{criterion, verdict, evidence}}). No prose, no fences."
+        )
+        try:
+            raw2 = await _call_llm(corrective)
+            result = _parse_to_schema(raw2)
+        except RuntimeError:
+            result = None
+        if result is None:
+            _rank_log.warning("ranker_parse_failed", preview=raw[:200])
+            return 0.0, [f"[error] unparseable LLM response: {raw[:160]!r}"]
 
-    # Score
-    try:
-        score = float(parsed.get("score", 0))
-    except (TypeError, ValueError):
-        score = 0.0
-    score = max(_MIN_SCORE, min(_MAX_SCORE, score))
-
-    # Per-criterion -> flat reasons. We also verify evidence is actually
-    # quoted from the item. Hallucinated evidence gets downgraded.
+    score = result.score
+    # Per-criterion -> flat reasons. Verify evidence is actually quoted from
+    # the item; downgrade "met" verdicts when the LLM hallucinated phrasing.
     item_text_blob = _item_text_blob(item)
-    per = parsed.get("per_criterion")
     reasons: list[str] = []
     downgrade_count = 0
-    if isinstance(per, list):
-        for entry in per:
-            if not isinstance(entry, dict):
-                continue
-            verdict = str(entry.get("verdict", "")).lower().strip()
-            criterion = str(entry.get("criterion", "")).strip()
-            evidence = str(entry.get("evidence", "")).strip()
-            if not criterion:
-                continue
-            # Verify evidence: at least one 4+-char word from the evidence must
-            # appear in the item's text blob. This catches outright hallucination
-            # ("evidence: 'uses Python'" when Python isn't mentioned).
-            if verdict == "met" and evidence:
-                if not _evidence_grounded(evidence, item_text_blob):
-                    verdict = "partial"
-                    downgrade_count += 1
-                    evidence = f"{evidence} [unverified — downgraded]"
-            label = f"[{verdict}] {criterion}"
-            if evidence:
-                label += f" — {evidence[:200]}"
-            reasons.append(label)
+    for entry in result.per_criterion:
+        verdict = entry.verdict
+        criterion = entry.criterion.strip()
+        evidence = entry.evidence.strip()
+        if not criterion:
+            continue
+        if verdict == "met" and evidence:
+            if not _evidence_grounded(evidence, item_text_blob):
+                verdict = "partial"
+                downgrade_count += 1
+                evidence = f"{evidence} [unverified — downgraded]"
+        label = f"[{verdict}] {criterion}"
+        if evidence:
+            label += f" — {evidence[:200]}"
+        reasons.append(label)
 
-    summary = str(parsed.get("summary", "")).strip()
+    summary = result.summary.strip()
     if summary:
         reasons.append(f"[summary] {summary[:240]}")
 
@@ -173,6 +226,22 @@ async def rank(
 
 
 # ---------------------------------------------------------------------------
+
+
+def _parse_to_schema(raw: str) -> RankResult | None:
+    """Pull JSON out of `raw` and validate against RankResult.
+
+    Returns None when the response is unparseable OR fails schema validation.
+    Caller decides whether to retry with a corrective prompt.
+    """
+    obj = _extract_json_object(raw)
+    if obj is None:
+        return None
+    try:
+        return RankResult.model_validate(obj)
+    except ValidationError as exc:
+        _rank_log.debug("ranker_validation_error", error=str(exc)[:200])
+        return None
 
 
 def _trim_item(item: dict) -> dict:

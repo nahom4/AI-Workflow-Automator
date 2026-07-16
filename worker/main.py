@@ -22,27 +22,20 @@ try:
 except ImportError:
     pass
 
-try:
-    from rich.console import Console as _Console
-    console = _Console()
-except ImportError:
-    import re as _re
-
-    class console:  # type: ignore[no-redef]
-        @staticmethod
-        def print(*args, **kwargs):
-            text = " ".join(str(a) for a in args)
-            print(_re.sub(r"\[/?[^\]]*\]", "", text))
+from worker.obs.logging import configure as _configure_logging, get_logger
+_configure_logging()
+log = get_logger("worker.main")
 
 from worker.config import POLL_INTERVAL
 from worker.runner import run_automation
 from worker import db
+
 _shutdown = False
 
 
 def _handle_signal(sig, frame):
     global _shutdown
-    console.print(f"\n[yellow]Received signal {sig} — shutting down after current run...[/yellow]")
+    log.warning("worker_shutdown_signal", signal=sig)
     _shutdown = True
 
 
@@ -51,31 +44,43 @@ signal.signal(signal.SIGTERM, _handle_signal)
 
 
 async def main() -> None:
-    console.print("[bold green]AI Workflow Automator — worker started[/bold green]")
-    console.print(f"Poll interval: {POLL_INTERVAL}s")
+    log.info("worker_started", poll_interval_seconds=POLL_INTERVAL)
     await db.ensure_schema()
 
     while not _shutdown:
         try:
             due = await db.fetch_due_automations()
             if due:
-                console.print(f"[cyan]Found {len(due)} due automation(s)[/cyan]")
+                log.info("poll_found_due", count=len(due))
             for automation in due:
                 if _shutdown:
                     break
-                console.print(f"  Running: [bold]{automation['name']}[/bold] ({automation['id']})")
+                log.info(
+                    "automation_starting",
+                    automation_id=automation["id"],
+                    automation_name=automation["name"],
+                )
                 try:
                     await run_automation(automation)
-                    console.print(f"  [green]OK {automation['name']} completed[/green]")
+                    log.info(
+                        "automation_completed",
+                        automation_id=automation["id"],
+                        automation_name=automation["name"],
+                    )
                 except Exception as exc:
-                    console.print(f"  [red]FAIL {automation['name']}: {exc}[/red]")
+                    log.exception(
+                        "automation_failed",
+                        automation_id=automation["id"],
+                        automation_name=automation["name"],
+                        error=str(exc),
+                    )
                     await db.mark_automation_broken(automation["id"])
         except Exception as exc:
-            console.print(f"[red]Poll error: {exc}[/red]")
+            log.exception("poll_error", error=str(exc))
 
         await asyncio.sleep(POLL_INTERVAL)
 
-    console.print("[yellow]Worker stopped.[/yellow]")
+    log.info("worker_stopped")
 
 
 if __name__ == "__main__":

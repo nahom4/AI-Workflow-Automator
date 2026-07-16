@@ -21,11 +21,14 @@ from worker.notify.email import send_lead_digest
 from worker.notify import sheets as sheets_notify
 from worker.notify import gmail_api
 from worker.notify.google_auth import get_valid_token
+from worker.obs.logging import bind_context, get_logger
 from worker.scout import (
     enrich, jsonld_extract, network_sniff, pydantic_scout, vision_scout, vision_scout_v2,
 )
 from worker.scout.discover import llm_suggest_paths, crawl_home_sublinks
 from worker.scout.validate import is_healthy
+
+_log_struct = get_logger("worker.runner")
 
 
 MAX_ITEMS_PER_SOURCE = 100
@@ -41,9 +44,32 @@ async def run_automation(automation: dict) -> None:
     threshold: float = float(spec.get("threshold", 6))
     cv_text: str | None = spec.get("cv_text")
     vertical: str = automation.get("vertical", "other")
+    user_id: str | None = automation.get("user_id")
 
+    # Wrap the entire run so every structlog line + every LLM call recorded
+    # via observe_llm_call carries run_id, automation_id, user_id.
+    with bind_context(run_id=run_id, automation_id=automation_id, user_id=user_id or ""):
+        await _run_inner(
+            automation=automation, run_id=run_id, automation_id=automation_id,
+            spec=spec, sources=sources, criteria=criteria, threshold=threshold,
+            cv_text=cv_text, vertical=vertical,
+        )
+
+
+async def _run_inner(
+    *,
+    automation: dict,
+    run_id: str,
+    automation_id: str,
+    spec: dict,
+    sources: list[str],
+    criteria: list[str],
+    threshold: float,
+    cv_text: str | None,
+    vertical: str,
+) -> None:
     await db.insert_run(run_id, automation_id)
-    await _log(run_id, "info", f"Run started — {len(sources)} source(s)")
+    await _log(run_id, "info", f"Run started — {len(sources)} source(s)", stage="start")
 
     items_seen = 0
     items_kept = 0
@@ -72,12 +98,13 @@ async def run_automation(automation: dict) -> None:
                     intent_text=automation.get("intent_text"),
                 )
                 items_seen += len(items)
-                await _log(run_id, "info", f"{domain}: fetched {len(items)} items")
+                await _log(run_id, "info", f"{domain}: fetched {len(items)} items", stage="fetch")
 
                 if items and not is_healthy(items):
                     await _log(
                         run_id, "warning",
-                        f"{domain}: low-quality extraction — spec may need re-scouting"
+                        f"{domain}: low-quality extraction — spec may need re-scouting",
+                        stage="fetch",
                     )
 
                 # Title-only ranks are noisy ("Project Hail Mary" → sci-fi? coming-of-age?).
@@ -102,7 +129,8 @@ async def run_automation(automation: dict) -> None:
                         except Exception as exc:
                             desc = None
                             await _log(run_id, "warning",
-                                       f"enrich failed for {item.get('url')}: {exc}")
+                                       f"enrich failed for {item.get('url')}: {exc}",
+                                       stage="enrich")
                         if desc:
                             item["description"] = desc
                             score, reasons = await rank(
@@ -158,7 +186,7 @@ async def run_automation(automation: dict) -> None:
             except Exception:
                 pass
 
-    await _log(run_id, "info", f"Kept {items_kept} / {items_seen} items ({len(new_leads)} new)")
+    await _log(run_id, "info", f"Kept {items_kept} / {items_seen} items ({len(new_leads)} new)", stage="filter")
 
     # Notify — Resend email
     if new_leads and automation.get("notify_email"):
@@ -168,9 +196,9 @@ async def run_automation(automation: dict) -> None:
                 automation_name=automation["name"],
                 leads=new_leads,
             )
-            await _log(run_id, "info", f"Email digest sent to {automation['notify_email']}")
+            await _log(run_id, "info", f"Email digest sent to {automation['notify_email']}", stage="notify")
         except Exception as exc:
-            await _log(run_id, "warning", f"Email failed: {exc}")
+            await _log(run_id, "warning", f"Email failed: {exc}", stage="notify")
 
     # Google integrations — resolve user tokens once
     user_id = automation.get("user_id")
@@ -209,11 +237,11 @@ async def run_automation(automation: dict) -> None:
                     access_token=token,
                     leads=new_leads,
                 )
-                await _log(run_id, "info", f"Wrote {n} row(s) to Google Sheet")
+                await _log(run_id, "info", f"Wrote {n} row(s) to Google Sheet", stage="notify")
             else:
-                await _log(run_id, "warning", "Google Sheets: no valid token — skipped")
+                await _log(run_id, "warning", "Google Sheets: no valid token — skipped", stage="notify")
         except Exception as exc:
-            await _log(run_id, "warning", f"Google Sheets failed: {exc}")
+            await _log(run_id, "warning", f"Google Sheets failed: {exc}", stage="notify")
 
     # Gmail
     if new_leads and notify_gmail and user_id:
@@ -228,11 +256,11 @@ async def run_automation(automation: dict) -> None:
                     leads=new_leads,
                     access_token=token,
                 )
-                await _log(run_id, "info", f"Gmail digest sent to {sender}")
+                await _log(run_id, "info", f"Gmail digest sent to {sender}", stage="notify")
             else:
-                await _log(run_id, "warning", "Gmail: no valid token — skipped")
+                await _log(run_id, "warning", "Gmail: no valid token — skipped", stage="notify")
         except Exception as exc:
-            await _log(run_id, "warning", f"Gmail failed: {exc}")
+            await _log(run_id, "warning", f"Gmail failed: {exc}", stage="notify")
 
     # Update schedule
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -251,8 +279,9 @@ async def run_automation(automation: dict) -> None:
         automation_id, last_run_at=now_ms, next_run_at=next_ms
     )
     await _log(
-        run_id, "success",
-        f"Done. Next run: {next_dt.strftime('%Y-%m-%d %H:%M UTC')}"
+        run_id, "info",
+        f"Done. Next run: {next_dt.strftime('%Y-%m-%d %H:%M UTC')}",
+        stage="finish",
     )
 
 
@@ -1031,8 +1060,19 @@ async def _extract_pydantic_at_url(tab, url: str, spec: dict) -> list[dict]:
     return items
 
 
-async def _log(run_id: str, level: str, message: str) -> None:
-    await db.append_run_log(run_id, level, message)
+async def _log(run_id: str, level: str, message: str, *, stage: str | None = None) -> None:
+    """Write to the DB run_logs table AND emit a structured log line.
+
+    The DB row is what the UI's run-log viewer reads. The structlog line is
+    what shows up in systemd journal / log aggregators with full context
+    (run_id, automation_id, user_id from contextvars).
+    """
+    await db.append_run_log(run_id, level, message, stage=stage)
+    method = getattr(_log_struct, level if level in ("debug", "info", "warning", "error") else "info")
+    extra: dict = {"run_id": run_id}
+    if stage:
+        extra["stage"] = stage
+    method("run_log", message=message, **extra)
 
 
 _BROWSER_DEAD_MARKERS = (
