@@ -17,7 +17,9 @@ export default auth((req) => {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/billing/webhook") ||
     pathname.startsWith("/api/billing/crypto-webhook") ||
-    pathname.startsWith("/api/billing/x402-info");
+    pathname.startsWith("/api/billing/x402-info") ||
+    pathname.startsWith("/api/health") ||
+    pathname.startsWith("/api/ready");
 
   if (!isLoggedIn && !isPublic) {
     // API routes get a JSON 401; HTML routes get a redirect to /login.
