@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Workflow Automator
 
-## Getting Started
+**Describe what you're looking for once. The system watches the sites, scores every result with an LLM, and delivers only the matches — to your inbox or a Google Sheet, on your schedule.**
 
-First, run the development server:
+A full-stack SaaS for always-on, AI-filtered web monitoring. A Next.js app lets users define an "automation" (sources + criteria + schedule + delivery), and a Python worker runs the pipeline: multi-source discovery → tiered scraping → LLM ranking → threshold filtering → delivery.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+![Landing page](screenshots/01-landing.png)
+
+---
+
+## How it works
+
+Each automation runs a five-stage pipeline on a cron schedule:
+
+```
+Sources ──▶ Scraper ──▶ AI Ranker ──▶ Filter ──▶ Delivery
+(adapters)  (3 tiers)   (Groq LLM)   (score≥N)   (Sheets / Gmail / email)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Sources** — pluggable adapters for job/board sites and feeds (Remotive, We Work Remotely, RemoteOK, Dev.to, Hacker News, GitHub Trending, Papers with Code, arXiv, Upwork).
+- **Scraper** — three escalating tiers: **Tier 1 API** → **Tier 2 CSS/JSON-LD** → **Tier 3 vision-based scout** (headless Chrome screenshot + LLM extraction) for sites with no clean structure.
+- **AI Ranker** — a Groq LLM scores each item 0–10 against the user's natural-language criteria.
+- **Filter** — keeps only items at or above the user's score threshold.
+- **Delivery** — pushes kept results to Google Sheets, Gmail, or transactional email.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+![Automation detail — pipeline view](screenshots/11-automation-detail-jobs.png)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Features
 
-## Learn More
+- **No-code automations** — define a vertical, sources, criteria, score threshold, and cron schedule from the UI.
+- **Tiered scraping with a vision fallback** — degrades gracefully from API to CSS to screenshot+LLM extraction.
+- **LLM ranking & enrichment** — relevance scoring plus structured field extraction validated with Pydantic.
+- **Multiple delivery channels** — Google Sheets, Gmail API, or Resend email.
+- **Auth** — email/password (bcrypt) and Google OAuth via NextAuth v5.
+- **Billing** — Paddle subscriptions and a USDC-on-Base crypto checkout (viem).
+- **Production observability** — structured logging (structlog), retries/backoff (tenacity), and per-run **LLM cost tracking**, with `/health` and `/ready` endpoints.
+- **Tested** — Playwright end-to-end tests and a pytest suite for the worker.
 
-To learn more about Next.js, take a look at the following resources:
+## Tech stack
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Layer | Tools |
+|---|---|
+| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| **Auth** | NextAuth v5 (`@auth/core`), bcrypt, Google OAuth |
+| **Data** | libSQL / Turso (SQLite locally) |
+| **AI** | Groq, OpenAI-compatible clients; Pydantic-validated extraction |
+| **Billing** | Paddle (webhooks), USDC-on-Base via `viem` |
+| **Worker** | Python — async adapters, headless Chrome, structlog, tenacity |
+| **Testing** | Playwright (E2E), pytest (worker) |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local development
 
-## Deploy on Vercel
+```bash
+# 1. Frontend
+cp .env.example .env.local   # fill in the values (see comments in the file)
+npm install
+npm run dev                  # http://localhost:3000
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# 2. Worker
+cd worker
+pip install -r requirements.txt
+python main.py
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [`.env.example`](.env.example) for every configuration value, with inline setup notes for Google OAuth, Groq, Resend, Turso, and Paddle.
+
+## Testing
+
+```bash
+npm run test          # Playwright E2E
+npm run test:python   # pytest (worker)
+npm run test:all      # both
+```
+
+## Project structure
+
+```
+src/app/            Next.js App Router — (app) dashboard, api routes, pricing & legal pages
+worker/
+  adapters/         one module per source (remotive, wwr, devto, hn, github_trending, ...)
+  scout/            discovery + tiered extraction (jsonld, network sniff, vision_scout)
+  ai/               groq / gemini clients + LLM ranker
+  notify/           email, gmail_api, google sheets delivery
+  obs/              structured logging, metrics, LLM cost/pricing
+```
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Automations](screenshots/08-automations-list.png) | ![New automation](screenshots/10-new-automation-filled.png) |
+| ![Leads](screenshots/12-leads-jobs.png) | ![Run logs](screenshots/13-logs-jobs.png) |
